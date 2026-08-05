@@ -1,0 +1,3 @@
+"""
+Domínio da plataforma Kynka.
+"""
