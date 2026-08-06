@@ -6,14 +6,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Any
 
+from kynka.domain.plugins.plugin import Plugin
 from kynka.kernel.registry import Registry
 
 
 @dataclass(slots=True)
 class Runtime:
     """
-    Controla o ciclo de vida principal da plataforma.
+    Controla o ciclo de vida da plataforma.
     """
 
     started: bool = False
@@ -21,9 +23,6 @@ class Runtime:
     registry: Registry = field(default_factory=Registry)
 
     def start(self) -> None:
-        """
-        Inicializa o Runtime.
-        """
         if self.started:
             return
 
@@ -33,9 +32,6 @@ class Runtime:
         print("✓ Runtime iniciado")
 
     def stop(self) -> None:
-        """
-        Finaliza o Runtime e descarrega os plugins.
-        """
         if not self.started:
             return
 
@@ -46,9 +42,25 @@ class Runtime:
 
         print("✓ Runtime finalizado")
 
+    def register_plugin(self, plugin: Plugin) -> None:
+        """
+        Registra um plugin no Runtime.
+        """
+        self.registry.register_plugin(plugin)
+
+    def execute(
+        self,
+        plugin_name: str,
+        **kwargs: Any,
+    ) -> Any:
+        """
+        Executa um plugin registrado.
+        """
+
+        plugin = self.registry.get_plugin(plugin_name)
+
+        return plugin.execute(**kwargs)
+
     @property
     def is_running(self) -> bool:
-        """
-        Indica se o Runtime está ativo.
-        """
         return self.started

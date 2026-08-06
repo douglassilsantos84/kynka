@@ -18,6 +18,7 @@ def banner() -> None:
 
 
 def main() -> None:
+
     banner()
 
     configuration = Configuration()
@@ -28,20 +29,22 @@ def main() -> None:
     logger.initialize()
     runtime.start()
 
-    hello_plugin = HelloPlugin()
-
-    runtime.registry.register_plugin(hello_plugin)
-
-    result = hello_plugin.execute(name="Douglas")
-
-    print()
-    print(result)
-    print()
-    print(
-        "Plugins registrados:",
-        len(runtime.registry.plugins),
+    runtime.register_plugin(
+        HelloPlugin()
     )
+
+    resultado = runtime.execute(
+        "hello",
+        name="Douglas",
+    )
+
     print()
+    print(resultado)
+    print()
+
+    print(
+        f"Plugins registrados: {len(runtime.registry.plugins)}"
+    )
 
     runtime.stop()
 
