@@ -24,6 +24,11 @@ class ExecutionRecord:
     result: Any = None
     error: str | None = None
 
+    # Indica se o resultado pode ser utilizado
+    # como resultado operacional em referências
+    # como "esse resultado".
+    operational: bool = True
+
 
 class ExecutionMemory:
     """
@@ -71,7 +76,8 @@ class ExecutionMemory:
         self,
     ) -> ExecutionRecord | None:
         """
-        Retorna a última execução registrada.
+        Retorna a última execução registrada,
+        independentemente do tipo.
         """
 
         if not self._records:
@@ -84,13 +90,54 @@ class ExecutionMemory:
         self,
     ) -> ExecutionRecord | None:
         """
-        Retorna a execução bem-sucedida mais recente.
+        Retorna a execução operacional bem-sucedida
+        mais recente.
+
+        Comandos administrativos/contextuais não
+        substituem o último resultado operacional.
+        """
+
+        for record in reversed(
+            self._records
+        ):
+            if (
+                record.success
+                and record.operational
+            ):
+                return record
+
+        return None
+
+    @property
+    def last_any_successful(
+        self,
+    ) -> ExecutionRecord | None:
+        """
+        Retorna o registro bem-sucedido mais recente,
+        incluindo comandos contextuais.
         """
 
         for record in reversed(
             self._records
         ):
             if record.success:
+                return record
+
+        return None
+
+    @property
+    def last_operational(
+        self,
+    ) -> ExecutionRecord | None:
+        """
+        Retorna a execução operacional mais recente,
+        independentemente de sucesso ou erro.
+        """
+
+        for record in reversed(
+            self._records
+        ):
+            if record.operational:
                 return record
 
         return None

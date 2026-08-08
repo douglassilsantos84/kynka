@@ -11,6 +11,9 @@ from kynka.application.agent import (
 from kynka.application.argument_extractor import (
     ArgumentExtractor,
 )
+from kynka.application.context import (
+    AgentContext,
+)
 from kynka.application.hybrid_argument_extractor import (
     HybridArgumentExtractor,
 )
@@ -26,7 +29,9 @@ from kynka.application.plugin_installer import (
     PluginInstaller,
 )
 from kynka.domain.plugins.plugin import Plugin
-from kynka.infrastructure.providers import OllamaProvider
+from kynka.infrastructure.providers import (
+    OllamaProvider,
+)
 from kynka.kernel.runtime import Runtime
 
 
@@ -34,8 +39,8 @@ class Kynka:
     """
     Fachada principal da plataforma Kynka.
 
-    Centraliza os principais subsistemas necessários
-    para execução de solicitações agênticas.
+    Centraliza os subsistemas necessários
+    para execução agêntica.
     """
 
     def __init__(
@@ -43,15 +48,35 @@ class Kynka:
         model: str = "llama3.2:3b",
         memory_size: int = 100,
     ) -> None:
+        # --------------------------------------------------
+        # Runtime
+        # --------------------------------------------------
+
         self._runtime = Runtime()
+
+        # --------------------------------------------------
+        # Provider
+        # --------------------------------------------------
 
         self._provider = OllamaProvider(
             model=model
         )
 
-        self._memory = ExecutionMemory(
+        # --------------------------------------------------
+        # Contexto
+        # --------------------------------------------------
+
+        memory = ExecutionMemory(
             max_records=memory_size
         )
+
+        self._context = AgentContext(
+            memory=memory
+        )
+
+        # --------------------------------------------------
+        # Argument extraction
+        # --------------------------------------------------
 
         self._argument_extractor = (
             HybridArgumentExtractor(
@@ -61,12 +86,22 @@ class Kynka:
             )
         )
 
+        # --------------------------------------------------
+        # Intent routing
+        # --------------------------------------------------
+
         self._router = HybridIntentRouter(
-            deterministic_router=IntentRouter(),
+            deterministic_router=(
+                IntentRouter()
+            ),
             llm_router=LLMIntentRouter(
                 self._provider
             ),
         )
+
+        # --------------------------------------------------
+        # Plugin installation
+        # --------------------------------------------------
 
         self._installer = PluginInstaller(
             runtime=self._runtime,
@@ -75,13 +110,17 @@ class Kynka:
             ),
         )
 
+        # --------------------------------------------------
+        # Agent
+        # --------------------------------------------------
+
         self._agent = AgentExecutor(
             runtime=self._runtime,
             router=self._router,
             argument_extractor=(
                 self._argument_extractor
             ),
-            memory=self._memory,
+            context=self._context,
         )
 
     def start(self) -> None:
@@ -115,12 +154,14 @@ class Kynka:
         text: str,
     ) -> AgentExecutionResult:
         """
-        Executa uma solicitação em linguagem natural.
+        Executa uma solicitação em
+        linguagem natural.
         """
 
         if not self._runtime.is_running:
             raise RuntimeError(
-                "A plataforma Kynka não está iniciada."
+                "A plataforma Kynka "
+                "não está iniciada."
             )
 
         return self._agent.execute(
@@ -132,17 +173,29 @@ class Kynka:
         return self._runtime
 
     @property
-    def memory(self) -> ExecutionMemory:
+    def context(self) -> AgentContext:
         """
-        Retorna a memória da sessão atual.
+        Retorna o contexto da sessão.
         """
 
-        return self._memory
+        return self._context
 
     @property
-    def plugins(self) -> tuple[str, ...]:
+    def memory(self) -> ExecutionMemory:
+        """
+        Atalho para a memória armazenada
+        no AgentContext.
+        """
+
+        return self._context.memory
+
+    @property
+    def plugins(
+        self,
+    ) -> tuple[str, ...]:
         return tuple(
-            self._runtime.registry.plugins.keys()
+            self._runtime.registry
+            .plugins.keys()
         )
 
     @property
@@ -150,7 +203,8 @@ class Kynka:
         self,
     ) -> tuple[str, ...]:
         return tuple(
-            self._runtime.registry.capabilities.keys()
+            self._runtime.registry
+            .capabilities.keys()
         )
 
     @property

@@ -4,12 +4,13 @@ Resolução de contexto da plataforma Kynka.
 
 from __future__ import annotations
 
-import re
 import unicodedata
 from dataclasses import dataclass
 from typing import Any
 
-from kynka.application.memory import ExecutionMemory
+from kynka.application.context.agent_context import (
+    AgentContext,
+)
 
 
 class ContextResolutionError(Exception):
@@ -36,7 +37,7 @@ class ContextResolution:
 class ContextResolver:
     """
     Resolve referências contextuais utilizando
-    a memória da sessão.
+    o AgentContext da sessão.
     """
 
     _RESULT_REFERENCES = (
@@ -49,9 +50,17 @@ class ContextResolver:
 
     def __init__(
         self,
-        memory: ExecutionMemory,
+        context: AgentContext,
     ) -> None:
-        self._memory = memory
+        self._context = context
+
+    @property
+    def context(self) -> AgentContext:
+        """
+        Retorna o contexto utilizado pelo resolver.
+        """
+
+        return self._context
 
     def resolve(
         self,
@@ -85,31 +94,27 @@ class ContextResolver:
                 used_memory=False,
             )
 
-        previous = self._memory.last_successful
+        previous_result = (
+            self._context.last_result
+        )
 
-        if previous is None:
+        if previous_result is None:
             raise ContextResolutionError(
                 "Não existe um resultado anterior "
                 "na memória da sessão."
             )
 
-        if previous.result is None:
-            raise ContextResolutionError(
-                "A última execução bem-sucedida "
-                "não possui resultado utilizável."
-            )
-
         resolved_text = self._replace_reference(
-            original_text,
-            reference,
-            previous.result,
+            original_text=original_text,
+            normalized_reference=reference,
+            value=previous_result,
         )
 
         return ContextResolution(
             original_text=original_text,
             resolved_text=resolved_text,
             used_memory=True,
-            referenced_value=previous.result,
+            referenced_value=previous_result,
         )
 
     def _find_reference(
@@ -118,10 +123,12 @@ class ContextResolver:
     ) -> str | None:
         """
         Identifica uma expressão que referencia
-        um resultado anterior.
+        o resultado anterior.
         """
 
-        for reference in self._RESULT_REFERENCES:
+        for reference in (
+            self._RESULT_REFERENCES
+        ):
             if reference in normalized_text:
                 return reference
 
@@ -134,8 +141,8 @@ class ContextResolver:
         value: Any,
     ) -> str:
         """
-        Substitui a referência contextual pelo
-        valor obtido da memória.
+        Substitui a referência contextual
+        pelo valor correspondente.
         """
 
         normalized_original = self._normalize(
@@ -149,8 +156,9 @@ class ContextResolver:
         if start < 0:
             return original_text
 
-        end = start + len(
-            normalized_reference
+        end = (
+            start
+            + len(normalized_reference)
         )
 
         return (
@@ -164,8 +172,8 @@ class ContextResolver:
         text: str,
     ) -> str:
         """
-        Normaliza texto preservando o comprimento
-        necessário para substituição posicional.
+        Normaliza texto removendo diferenças
+        de caixa e acentuação.
         """
 
         text = text.lower()

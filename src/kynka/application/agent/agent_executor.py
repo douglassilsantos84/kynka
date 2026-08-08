@@ -8,17 +8,21 @@ from dataclasses import dataclass
 from typing import Any
 
 from kynka.application.context import (
+    AgentContext,
+    ContextCommandHandler,
     ContextResolutionError,
     ContextResolver,
+    VariableResolver,
 )
 from kynka.application.intent_router import (
     IntentNotFoundError,
 )
 from kynka.application.memory import (
-    ExecutionMemory,
     ExecutionRecord,
 )
-from kynka.domain.capabilities import CapabilityResult
+from kynka.domain.capabilities import (
+    CapabilityResult,
+)
 from kynka.kernel.runtime import Runtime
 
 
@@ -44,8 +48,8 @@ class AgentExecutionResult:
 
 class AgentExecutor:
     """
-    Coordena contexto, roteamento, extração
-    de argumentos, execução e memória.
+    Coordena contexto, variáveis, roteamento,
+    extração de argumentos, execução e memória.
     """
 
     def __init__(
@@ -53,37 +57,39 @@ class AgentExecutor:
         runtime: Runtime,
         router: Any,
         argument_extractor: Any,
-        memory: ExecutionMemory | None = None,
+        context: AgentContext,
     ) -> None:
         self._runtime = runtime
         self._router = router
         self._argument_extractor = argument_extractor
-
-        self._memory = (
-            memory
-            if memory is not None
-            else ExecutionMemory()
-        )
+        self._context = context
 
         self._context_resolver = ContextResolver(
-            self._memory
+            self._context
+        )
+
+        self._variable_resolver = VariableResolver(
+            self._context
+        )
+
+        self._context_command_handler = (
+            ContextCommandHandler(
+                self._context
+            )
         )
 
     @property
-    def memory(self) -> ExecutionMemory:
-        """
-        Retorna a memória utilizada pelo agente.
-        """
+    def context(self) -> AgentContext:
+        return self._context
 
-        return self._memory
+    @property
+    def memory(self):
+        return self._context.memory
 
     def execute(
         self,
         text: str,
     ) -> AgentExecutionResult:
-        """
-        Executa uma solicitação em linguagem natural.
-        """
 
         original_text = text.strip()
 
@@ -96,16 +102,61 @@ class AgentExecutor:
                         "A solicitação não pode "
                         "estar vazia."
                     ),
-                )
+                ),
+                operational=False,
+            )
+
+        self._context.set_current(
+            original_text
+        )
+
+        try:
+            return self._execute(
+                original_text
+            )
+
+        finally:
+            self._context.clear_current()
+
+    def _execute(
+        self,
+        original_text: str,
+    ) -> AgentExecutionResult:
+
+        # --------------------------------------------------
+        # 1. Comandos contextuais
+        # --------------------------------------------------
+
+        context_command = (
+            self._context_command_handler.handle(
+                original_text
+            )
+        )
+
+        if context_command.handled:
+            return self._finish(
+                AgentExecutionResult(
+                    success=context_command.success,
+                    text=original_text,
+                    result=(
+                        context_command.message
+                        if context_command.success
+                        else None
+                    ),
+                    error=context_command.error,
+                ),
+                operational=False,
             )
 
         # --------------------------------------------------
-        # 1. Resolver contexto
+        # 2. Resultado anterior
         # --------------------------------------------------
 
         try:
-            context = self._context_resolver.resolve(
-                original_text
+            context_resolution = (
+                self._context_resolver.resolve(
+                    original_text
+                )
             )
 
         except ContextResolutionError as error:
@@ -117,10 +168,26 @@ class AgentExecutor:
                 )
             )
 
-        execution_text = context.resolved_text
+        execution_text = (
+            context_resolution.resolved_text
+        )
 
         # --------------------------------------------------
-        # 2. Construir catálogo de Capabilities
+        # 3. Variáveis nomeadas
+        # --------------------------------------------------
+
+        variable_resolution = (
+            self._variable_resolver.resolve(
+                execution_text
+            )
+        )
+
+        execution_text = (
+            variable_resolution.resolved_text
+        )
+
+        # --------------------------------------------------
+        # 4. Catálogo de Capabilities
         # --------------------------------------------------
 
         capability_catalog = (
@@ -128,7 +195,7 @@ class AgentExecutor:
         )
 
         # --------------------------------------------------
-        # 3. Identificar intenção
+        # 5. Roteamento
         # --------------------------------------------------
 
         try:
@@ -149,12 +216,13 @@ class AgentExecutor:
             )
 
         # --------------------------------------------------
-        # 4. Obter Capability
+        # 6. Capability
         # --------------------------------------------------
 
         try:
             capability = (
-                self._runtime.registry.get_capability(
+                self._runtime.registry
+                .get_capability(
                     route.capability
                 )
             )
@@ -170,17 +238,18 @@ class AgentExecutor:
             )
 
         # --------------------------------------------------
-        # 5. Obter parâmetros da Capability
+        # 7. Parâmetros
         # --------------------------------------------------
 
         parameters = {
-            parameter.name: parameter.description
+            parameter.name:
+                parameter.description
             for parameter
             in capability.metadata.parameters
         }
 
         # --------------------------------------------------
-        # 6. Extrair argumentos
+        # 8. Extração de argumentos
         # --------------------------------------------------
 
         try:
@@ -201,7 +270,7 @@ class AgentExecutor:
             )
 
         # --------------------------------------------------
-        # 7. Executar Capability
+        # 9. Execução
         # --------------------------------------------------
 
         try:
@@ -224,7 +293,7 @@ class AgentExecutor:
             )
 
         # --------------------------------------------------
-        # 8. Converter CapabilityResult
+        # 10. CapabilityResult
         # --------------------------------------------------
 
         if isinstance(
@@ -243,7 +312,7 @@ class AgentExecutor:
             )
 
         # --------------------------------------------------
-        # 9. Resultado genérico
+        # 11. Resultado genérico
         # --------------------------------------------------
 
         return self._finish(
@@ -259,13 +328,19 @@ class AgentExecutor:
     def _finish(
         self,
         result: AgentExecutionResult,
+        *,
+        operational: bool = True,
     ) -> AgentExecutionResult:
         """
-        Finaliza uma execução registrando-a
+        Finaliza uma execução e registra o resultado
         na memória da sessão.
+
+        operational=False indica que o registro pertence
+        ao controle/contexto da sessão e não deve substituir
+        o último resultado operacional.
         """
 
-        self._memory.add(
+        self._context.memory.add(
             ExecutionRecord(
                 text=result.text,
                 success=result.success,
@@ -273,6 +348,7 @@ class AgentExecutor:
                 arguments=result.arguments,
                 result=result.result,
                 error=result.error,
+                operational=operational,
             )
         )
 
@@ -281,10 +357,6 @@ class AgentExecutor:
     def _build_capability_catalog(
         self,
     ) -> dict[str, str]:
-        """
-        Constrói o catálogo de Capabilities
-        disponível para o roteador.
-        """
 
         return {
             name: capability.metadata.description
@@ -298,10 +370,6 @@ class AgentExecutor:
         capability_name: str,
         parameters: dict[str, str],
     ) -> dict[str, Any]:
-        """
-        Extrai os argumentos necessários
-        para executar uma Capability.
-        """
 
         if not parameters:
             return {}
