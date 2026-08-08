@@ -138,6 +138,20 @@ class KynkaCLI:
             self._show_capabilities()
             return True
 
+        if normalized in {
+            "memoria",
+            "memória",
+        }:
+            self._show_memory()
+            return True
+
+        if normalized in {
+            "limpar memoria",
+            "limpar memória",
+        }:
+            self._clear_memory()
+            return True
+
         return False
 
     def _show_banner(self) -> None:
@@ -170,6 +184,11 @@ class KynkaCLI:
         print(
             "Capabilities registradas: "
             f"{len(self._kynka.capabilities)}"
+        )
+
+        print(
+            "Execuções na memória: "
+            f"{len(self._kynka.memory)}"
         )
 
         print()
@@ -220,6 +239,80 @@ class KynkaCLI:
 
         print()
 
+    def _show_memory(self) -> None:
+        """
+        Exibe o histórico de execuções
+        armazenado na memória da sessão.
+        """
+
+        records = self._kynka.memory.records
+
+        print()
+
+        if not records:
+            print(
+                "A memória da sessão está vazia."
+            )
+            print()
+            return
+
+        print("Histórico da sessão:")
+        print()
+
+        for index, record in enumerate(
+            records,
+            start=1,
+        ):
+            print(
+                f"{index}. "
+                f"{record.capability or 'sem capability'}"
+            )
+
+            print(
+                f"   Solicitação: {record.text}"
+            )
+
+            if record.arguments is not None:
+                print(
+                    "   Argumentos: "
+                    f"{record.arguments}"
+                )
+
+            if record.success:
+                print(
+                    f"   Resultado: {record.result}"
+                )
+            else:
+                print(
+                    f"   Erro: {record.error}"
+                )
+
+            print()
+
+    def _clear_memory(self) -> None:
+        """
+        Limpa a memória da sessão.
+        """
+
+        quantity = len(
+            self._kynka.memory
+        )
+
+        self._kynka.memory.clear()
+
+        print()
+
+        if quantity == 0:
+            print(
+                "A memória já estava vazia."
+            )
+        else:
+            print(
+                "Memória da sessão limpa."
+            )
+
+        print()
+
     @staticmethod
     def _show_help() -> None:
         """
@@ -228,24 +321,40 @@ class KynkaCLI:
 
         print()
         print("Comandos disponíveis:")
+
         print(
-            "  ajuda         "
+            "  ajuda           "
             "Exibe esta ajuda."
         )
+
         print(
-            "  status        "
+            "  status          "
             "Exibe o estado da plataforma."
         )
+
         print(
-            "  plugins       "
+            "  plugins         "
             "Lista os Plugins instalados."
         )
+
         print(
-            "  capabilities  "
+            "  capabilities    "
             "Lista as Capabilities disponíveis."
         )
+
         print(
-            "  sair          "
+            "  memoria         "
+            "Exibe o histórico da sessão."
+        )
+
+        print(
+            "  limpar memoria  "
+            "Limpa o histórico da sessão."
+        )
+
+        print(
+            "  sair            "
             "Finaliza a Kynka."
         )
+
         print()

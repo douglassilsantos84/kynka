@@ -19,6 +19,9 @@ from kynka.application.intent_router import (
     IntentRouter,
     LLMIntentRouter,
 )
+from kynka.application.memory import (
+    ExecutionMemory,
+)
 from kynka.application.plugin_installer import (
     PluginInstaller,
 )
@@ -31,23 +34,23 @@ class Kynka:
     """
     Fachada principal da plataforma Kynka.
 
-    Centraliza:
-    - Runtime;
-    - Provider;
-    - roteamento;
-    - extração de argumentos;
-    - instalação de Plugins;
-    - execução agêntica.
+    Centraliza os principais subsistemas necessários
+    para execução de solicitações agênticas.
     """
 
     def __init__(
         self,
         model: str = "llama3.2:3b",
+        memory_size: int = 100,
     ) -> None:
         self._runtime = Runtime()
 
         self._provider = OllamaProvider(
             model=model
+        )
+
+        self._memory = ExecutionMemory(
+            max_records=memory_size
         )
 
         self._argument_extractor = (
@@ -78,6 +81,7 @@ class Kynka:
             argument_extractor=(
                 self._argument_extractor
             ),
+            memory=self._memory,
         )
 
     def start(self) -> None:
@@ -99,7 +103,7 @@ class Kynka:
         plugin: Plugin,
     ) -> None:
         """
-        Instala um Plugin na plataforma.
+        Instala um Plugin.
         """
 
         self._installer.install(
@@ -125,36 +129,30 @@ class Kynka:
 
     @property
     def runtime(self) -> Runtime:
-        """
-        Expõe o Runtime para inspeção.
-        """
-
         return self._runtime
 
     @property
-    def plugins(self) -> tuple[str, ...]:
+    def memory(self) -> ExecutionMemory:
         """
-        Retorna os Plugins instalados.
+        Retorna a memória da sessão atual.
         """
 
+        return self._memory
+
+    @property
+    def plugins(self) -> tuple[str, ...]:
         return tuple(
             self._runtime.registry.plugins.keys()
         )
 
     @property
-    def capabilities(self) -> tuple[str, ...]:
-        """
-        Retorna as Capabilities disponíveis.
-        """
-
+    def capabilities(
+        self,
+    ) -> tuple[str, ...]:
         return tuple(
             self._runtime.registry.capabilities.keys()
         )
 
     @property
     def model(self) -> str:
-        """
-        Retorna o modelo configurado no Provider.
-        """
-
         return self._provider.model
