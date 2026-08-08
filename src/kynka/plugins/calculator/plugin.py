@@ -4,14 +4,26 @@ Calculator Plugin da plataforma Kynka.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import Any
+
 from kynka.domain.capabilities import Capability
 from kynka.domain.plugins.plugin import (
     Plugin,
     PluginMetadata,
 )
+from kynka.plugins.calculator.argument_extractor import (
+    CalculatorArgumentExtractor,
+)
 from kynka.plugins.calculator.capabilities import (
     MultiplyCapability,
 )
+
+
+ArgumentExtractionStrategy = Callable[
+    [str],
+    dict[str, Any],
+]
 
 
 class CalculatorPlugin(Plugin):
@@ -40,9 +52,31 @@ class CalculatorPlugin(Plugin):
             MultiplyCapability(),
         ]
 
+        extractor = CalculatorArgumentExtractor()
+
+        self._argument_strategies: dict[
+            str,
+            ArgumentExtractionStrategy,
+        ] = {
+            "calculator.multiply": (
+                extractor.extract_multiply
+            ),
+        }
+
     @property
     def capabilities(self) -> list[Capability]:
         return self._capabilities
+
+    @property
+    def argument_strategies(
+        self,
+    ) -> dict[
+        str,
+        ArgumentExtractionStrategy,
+    ]:
+        return dict(
+            self._argument_strategies
+        )
 
     def on_load(self) -> None:
         print("✓ Calculator Plugin carregado")

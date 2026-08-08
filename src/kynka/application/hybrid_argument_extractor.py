@@ -10,6 +10,7 @@ from typing import Any
 from kynka.application.argument_extractor import (
     ArgumentExtractor,
 )
+from kynka.domain.plugins.plugin import Plugin
 
 
 ArgumentExtractionStrategy = Callable[
@@ -20,11 +21,11 @@ ArgumentExtractionStrategy = Callable[
 
 class HybridArgumentExtractor:
     """
-    Coordena estratégias específicas e extração por LLM.
+    Coordena estratégias determinísticas específicas
+    e extração baseada em LLM.
 
-    Uma Capability pode possuir um extrator determinístico
-    registrado. Caso não possua, o ArgumentExtractor baseado
-    em Provider é utilizado como fallback.
+    Estratégias específicas têm prioridade.
+    O LLM é utilizado como fallback.
     """
 
     def __init__(
@@ -44,7 +45,7 @@ class HybridArgumentExtractor:
         strategy: ArgumentExtractionStrategy,
     ) -> None:
         """
-        Registra uma estratégia específica para uma Capability.
+        Registra uma estratégia para uma Capability.
         """
 
         capability_name = capability_name.strip()
@@ -54,9 +55,35 @@ class HybridArgumentExtractor:
                 "O nome da Capability não pode estar vazio."
             )
 
+        if not callable(strategy):
+            raise TypeError(
+                "A estratégia de extração precisa ser executável."
+            )
+
         self._strategies[
             capability_name
         ] = strategy
+
+    def register_plugin(
+        self,
+        plugin: Plugin,
+    ) -> None:
+        """
+        Registra automaticamente as estratégias
+        de extração declaradas por um Plugin.
+        """
+
+        strategies = getattr(
+            plugin,
+            "argument_strategies",
+            {},
+        )
+
+        for capability_name, strategy in strategies.items():
+            self.register(
+                capability_name=capability_name,
+                strategy=strategy,
+            )
 
     def extract(
         self,
@@ -65,8 +92,13 @@ class HybridArgumentExtractor:
         parameters: dict[str, str],
     ) -> dict[str, Any]:
         """
-        Extrai argumentos usando primeiro uma estratégia
-        específica e depois o LLM como fallback.
+        Extrai os argumentos necessários.
+
+        Prioridade:
+        1. estratégia específica;
+        2. LLM;
+        3. nenhum argumento, quando a Capability
+           não possui parâmetros.
         """
 
         strategy = self._strategies.get(
@@ -90,8 +122,8 @@ class HybridArgumentExtractor:
         self,
     ) -> tuple[str, ...]:
         """
-        Retorna as Capabilities que possuem
-        estratégia específica registrada.
+        Retorna os nomes das Capabilities que possuem
+        estratégias específicas registradas.
         """
 
         return tuple(

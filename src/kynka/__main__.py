@@ -2,11 +2,10 @@
 Ponto de entrada da plataforma Kynka.
 """
 
-from kynka import __version__
-from kynka.domain.tasks import Task
-from kynka.kernel.configuration import Configuration
-from kynka.kernel.logger import Logger
-from kynka.kernel.runtime import Runtime
+from __future__ import annotations
+
+from kynka import Kynka, __version__
+from kynka.plugins.calculator import CalculatorPlugin
 from kynka.plugins.hello.plugin_v2 import HelloPluginV2
 
 
@@ -24,56 +23,64 @@ def banner() -> None:
 
 def main() -> None:
     """
-    Inicializa e executa a plataforma.
+    Executa a demonstração principal da plataforma.
     """
 
     banner()
 
-    configuration = Configuration()
-    logger = Logger()
-    runtime = Runtime()
+    kynka = Kynka()
 
-    configuration.load()
-    logger.initialize()
-    runtime.start()
+    try:
+        kynka.start()
 
-    runtime.register_plugin(
-        HelloPluginV2()
-    )
+        kynka.install(
+            HelloPluginV2()
+        )
 
-    task = Task(
-        text="Diga olá para Douglas",
-        context={
-            "name": "Douglas",
-        },
-    )
+        kynka.install(
+            CalculatorPlugin()
+        )
 
-    result = runtime.run(task)
+        print()
+        print(
+            f"Modelo: {kynka.model}"
+        )
 
-    print()
+        print(
+            f"Plugins registrados: "
+            f"{len(kynka.plugins)}"
+        )
 
-    if result.success:
-        print(result.data)
-    else:
-        print(f"Erro: {result.error}")
+        print(
+            f"Capabilities registradas: "
+            f"{len(kynka.capabilities)}"
+        )
 
-    print()
-    print(
-        f"Capability selecionada: {result.capability}"
-    )
+        print()
 
-    print(
-        f"Plugins registrados: {len(runtime.registry.plugins)}"
-    )
+        greeting_result = kynka.execute(
+            "Olá Douglas"
+        )
 
-    print(
-        f"Capabilities registradas: "
-        f"{len(runtime.registry.capabilities)}"
-    )
+        print(
+            "Cumprimento:",
+            greeting_result.result,
+        )
 
-    runtime.stop()
+        calculation_result = kynka.execute(
+            "Calcule 125 vezes 37"
+        )
 
-    print()
+        print(
+            "Cálculo:",
+            calculation_result.result,
+        )
+
+        print()
+
+    finally:
+        kynka.stop()
+
     print("Sistema finalizado.")
     print()
 
