@@ -31,13 +31,17 @@ class MultiplyCapability(Capability):
                 parameters=(
                     CapabilityParameter(
                         name="left",
-                        description="Primeiro número da multiplicação.",
+                        description=(
+                            "Primeiro número da multiplicação."
+                        ),
                         type="number",
                         required=True,
                     ),
                     CapabilityParameter(
                         name="right",
-                        description="Segundo número da multiplicação.",
+                        description=(
+                            "Segundo número da multiplicação."
+                        ),
                         type="number",
                         required=True,
                     ),

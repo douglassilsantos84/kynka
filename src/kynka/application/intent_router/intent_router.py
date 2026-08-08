@@ -1,9 +1,10 @@
 """
-Roteamento de intenções da plataforma Kynka.
+Roteamento determinístico de intenções da plataforma Kynka.
 """
 
 from __future__ import annotations
 
+import re
 import unicodedata
 from dataclasses import dataclass
 
@@ -30,21 +31,90 @@ class IntentRouter:
     Responsável por transformar uma solicitação textual
     em uma Capability conhecida pela plataforma.
 
-    Nesta primeira versão, o roteamento é determinístico
-    e baseado em palavras-chave.
+    O roteamento desta classe é determinístico.
     """
 
-    def route(self, text: str) -> IntentRoute:
+    def route(
+        self,
+        text: str,
+    ) -> IntentRoute:
         """
-        Identifica a Capability adequada para o texto recebido.
+        Identifica uma Capability através de regras determinísticas.
         """
 
         normalized_text = self._normalize(text)
 
         if not normalized_text:
             raise IntentNotFoundError(
-                "Não é possível identificar uma intenção em um texto vazio."
+                "Não é possível identificar uma intenção "
+                "em um texto vazio."
             )
+
+        calculator_route = self._route_calculator(
+            normalized_text
+        )
+
+        if calculator_route is not None:
+            return calculator_route
+
+        greeting_route = self._route_greeting(
+            normalized_text
+        )
+
+        if greeting_route is not None:
+            return greeting_route
+
+        raise IntentNotFoundError(
+            f"Nenhuma intenção conhecida para: {text!r}"
+        )
+
+    @staticmethod
+    def _route_calculator(
+        text: str,
+    ) -> IntentRoute | None:
+        """
+        Identifica solicitações explícitas de multiplicação.
+        """
+
+        multiplication_terms = (
+            "multiplique",
+            "multiplicar",
+            "multiplicacao",
+            "vezes",
+        )
+
+        has_multiplication_term = any(
+            term in text
+            for term in multiplication_terms
+        )
+
+        if not has_multiplication_term:
+            return None
+
+        numbers = re.findall(
+            r"[-+]?(?:\d+(?:[.,]\d+)?|[.,]\d+)",
+            text,
+        )
+
+        if len(numbers) < 2:
+            return None
+
+        return IntentRoute(
+            capability="calculator.multiply",
+            confidence=1.0,
+            reason=(
+                "Foi identificada uma solicitação "
+                "explícita de multiplicação."
+            ),
+        )
+
+    @staticmethod
+    def _route_greeting(
+        text: str,
+    ) -> IntentRoute | None:
+        """
+        Identifica solicitações de cumprimento.
+        """
 
         greeting_terms = (
             "ola",
@@ -57,22 +127,25 @@ class IntentRouter:
             "diga ola",
         )
 
-        if any(
-            term in normalized_text
+        if not any(
+            term in text
             for term in greeting_terms
         ):
-            return IntentRoute(
-                capability="greeting.hello",
-                confidence=1.0,
-                reason="Foi identificada uma intenção de cumprimento.",
-            )
+            return None
 
-        raise IntentNotFoundError(
-            f"Nenhuma intenção conhecida para: {text!r}"
+        return IntentRoute(
+            capability="greeting.hello",
+            confidence=1.0,
+            reason=(
+                "Foi identificada uma intenção "
+                "de cumprimento."
+            ),
         )
 
     @staticmethod
-    def _normalize(text: str) -> str:
+    def _normalize(
+        text: str,
+    ) -> str:
         """
         Normaliza o texto para facilitar o roteamento.
         """
