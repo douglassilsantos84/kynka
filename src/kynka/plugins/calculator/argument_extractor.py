@@ -1,5 +1,6 @@
 """
-Extração determinística de argumentos do Calculator Plugin.
+Extração determinística de argumentos
+do Calculator Plugin.
 """
 
 from __future__ import annotations
@@ -8,60 +9,69 @@ import re
 from typing import Any
 
 
-class CalculatorArgumentExtractionError(Exception):
+class CalculatorArgumentExtractionError(
+    Exception
+):
     """
-    Erro lançado quando não é possível identificar
-    os argumentos necessários para uma operação matemática.
+    Erro na extração de argumentos matemáticos.
     """
 
 
 class CalculatorArgumentExtractor:
     """
-    Extrai argumentos matemáticos diretamente do texto.
-
-    Esta implementação não depende de LLM.
+    Extrai números de solicitações destinadas
+    às Capabilities do Calculator Plugin.
     """
 
-    NUMBER_PATTERN = re.compile(
-        r"[-+]?(?:\d+(?:[.,]\d+)?|[.,]\d+)"
-    )
+    def extract_add(
+        self,
+        text: str,
+    ) -> dict[str, Any]:
+        """
+        Extrai os dois operandos de uma adição.
+        """
+
+        return self._extract_two_numbers(
+            text
+        )
 
     def extract_multiply(
         self,
         text: str,
     ) -> dict[str, Any]:
         """
-        Extrai os dois operandos necessários para multiplicação.
+        Extrai os dois operandos de uma multiplicação.
         """
 
-        text = text.strip()
-
-        if not text:
-            raise CalculatorArgumentExtractionError(
-                "Não é possível extrair argumentos de um texto vazio."
-            )
-
-        matches = self.NUMBER_PATTERN.findall(
+        return self._extract_two_numbers(
             text
+        )
+
+    def _extract_two_numbers(
+        self,
+        text: str,
+    ) -> dict[str, Any]:
+        """
+        Localiza exatamente os dois primeiros
+        valores numéricos presentes no texto.
+        """
+
+        matches = re.findall(
+            r"[-+]?\d+(?:[.,]\d+)?",
+            text,
         )
 
         if len(matches) < 2:
             raise CalculatorArgumentExtractionError(
-                "Não foi possível identificar dois números "
-                "para a multiplicação."
+                "Não foi possível identificar "
+                "dois números na solicitação."
             )
 
-        if len(matches) > 2:
-            raise CalculatorArgumentExtractionError(
-                "Foram encontrados mais de dois números "
-                "na solicitação."
-            )
-
-        left = self._convert_number(
+        left = self._parse_number(
             matches[0]
         )
 
-        right = self._convert_number(
+        right = self._parse_number(
             matches[1]
         )
 
@@ -71,11 +81,12 @@ class CalculatorArgumentExtractor:
         }
 
     @staticmethod
-    def _convert_number(
+    def _parse_number(
         value: str,
     ) -> int | float:
         """
-        Converte representação textual em int ou float.
+        Converte uma representação textual
+        em int ou float.
         """
 
         normalized = value.replace(

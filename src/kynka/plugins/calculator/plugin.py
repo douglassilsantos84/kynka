@@ -16,6 +16,7 @@ from kynka.plugins.calculator.argument_extractor import (
     CalculatorArgumentExtractor,
 )
 from kynka.plugins.calculator.capabilities import (
+    AddCapability,
     MultiplyCapability,
 )
 
@@ -35,7 +36,7 @@ class CalculatorPlugin(Plugin):
         super().__init__(
             PluginMetadata(
                 name="calculator",
-                version="1.0.0",
+                version="1.1.0",
                 description=(
                     "Fornece operações matemáticas "
                     "para a plataforma Kynka."
@@ -49,22 +50,30 @@ class CalculatorPlugin(Plugin):
         )
 
         self._capabilities = [
+            AddCapability(),
             MultiplyCapability(),
         ]
 
-        extractor = CalculatorArgumentExtractor()
+        extractor = (
+            CalculatorArgumentExtractor()
+        )
 
         self._argument_strategies: dict[
             str,
             ArgumentExtractionStrategy,
         ] = {
+            "calculator.add": (
+                extractor.extract_add
+            ),
             "calculator.multiply": (
                 extractor.extract_multiply
             ),
         }
 
     @property
-    def capabilities(self) -> list[Capability]:
+    def capabilities(
+        self,
+    ) -> list[Capability]:
         return self._capabilities
 
     @property
@@ -79,7 +88,11 @@ class CalculatorPlugin(Plugin):
         )
 
     def on_load(self) -> None:
-        print("✓ Calculator Plugin carregado")
+        print(
+            "✓ Calculator Plugin carregado"
+        )
 
     def on_unload(self) -> None:
-        print("✓ Calculator Plugin finalizado")
+        print(
+            "✓ Calculator Plugin finalizado"
+        )
