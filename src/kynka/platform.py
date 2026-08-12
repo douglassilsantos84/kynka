@@ -4,6 +4,8 @@ Fachada principal da plataforma Kynka.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from kynka.application.agent import (
     AgentExecutionResult,
     AgentExecutor,
@@ -11,7 +13,9 @@ from kynka.application.agent import (
 from kynka.application.argument_extractor import (
     ArgumentExtractor,
 )
-from kynka.application.context import AgentContext
+from kynka.application.context import (
+    AgentContext,
+)
 from kynka.application.execution import (
     ExecutionMode,
     ExecutionModeSelector,
@@ -26,7 +30,6 @@ from kynka.application.intent_router import (
 )
 from kynka.application.memory import (
     ExecutionMemory,
-    ExecutionRecord,
 )
 from kynka.application.planning import (
     DeterministicPlanner,
@@ -40,9 +43,46 @@ from kynka.application.planning import (
 from kynka.application.plugin_installer import (
     PluginInstaller,
 )
+from kynka.application.recovery import (
+    PlanRecovery,
+    RecoveryDecision,
+)
 from kynka.domain.plugins.plugin import Plugin
-from kynka.infrastructure.providers import OllamaProvider
+from kynka.infrastructure.providers import (
+    OllamaProvider,
+)
 from kynka.kernel.runtime import Runtime
+
+
+@dataclass(frozen=True, slots=True)
+class GoalExecutionResult:
+    """
+    Resultado de uma execução orientada a objetivo.
+
+    Reúne:
+
+    - resultado da execução do plano;
+    - decisão de recuperação, caso necessária.
+    """
+
+    execution: PlanExecutionResult
+    recovery: RecoveryDecision
+
+    @property
+    def success(self) -> bool:
+        return self.execution.success
+
+    @property
+    def result(self):
+        return self.execution.result
+
+    @property
+    def error(self) -> str | None:
+        return self.execution.error
+
+    @property
+    def steps(self):
+        return self.execution.steps
 
 
 class Kynka:
@@ -59,7 +99,8 @@ class Kynka:
     - extração de argumentos;
     - planejamento;
     - execução de planos;
-    - seleção automática do modo de execução.
+    - seleção automática do modo de execução;
+    - análise de recuperação de planos.
     """
 
     def __init__(
@@ -162,6 +203,12 @@ class Kynka:
         self._plan_executor = PlanExecutor(
             self._runtime
         )
+
+        # --------------------------------------------------
+        # Recovery
+        # --------------------------------------------------
+
+        self._plan_recovery = PlanRecovery()
 
         # --------------------------------------------------
         # Seleção do modo de execução
@@ -309,8 +356,8 @@ class Kynka:
         """
         Planeja e executa um objetivo composto.
 
-        O resultado final do plano é registrado
-        na memória operacional da sessão.
+        Mantido como operação direta para preservar
+        compatibilidade com o comportamento atual.
         """
 
         self._ensure_running()
@@ -319,50 +366,55 @@ class Kynka:
             goal
         )
 
-        result = self.execute_plan(
+        return self.execute_plan(
             plan
         )
 
-        self._record_plan_execution(
-            goal=goal,
-            result=result,
+    # ======================================================
+    # Recovery
+    # ======================================================
+
+    def analyze_recovery(
+        self,
+        result: PlanExecutionResult,
+    ) -> RecoveryDecision:
+        """
+        Analisa um resultado de execução e determina
+        qual estratégia de recuperação é adequada.
+
+        Nenhuma nova execução é realizada aqui.
+        """
+
+        return self._plan_recovery.decide(
+            result
         )
 
-        return result
-
-    # ======================================================
-    # Memória de planejamento
-    # ======================================================
-
-    def _record_plan_execution(
+    def execute_goal_with_recovery(
         self,
         goal: str,
-        result: PlanExecutionResult,
-    ) -> None:
+    ) -> GoalExecutionResult:
         """
-        Registra o resultado global de um plano
-        na memória operacional da sessão.
+        Planeja e executa um objetivo e, em seguida,
+        analisa se alguma recuperação é necessária.
 
-        Isso permite que solicitações posteriores
-        utilizem expressões como:
-
-        - esse resultado;
-        - resultado anterior;
-        - último resultado.
+        Nesta versão a recuperação ainda é apenas
+        uma decisão. Não existe retry ou replanning
+        automático.
         """
 
-        self._context.memory.add(
-            ExecutionRecord(
-                text=goal,
-                success=result.success,
-                capability="planning.plan",
-                result=result.result,
-                error=getattr(
-                    result,
-                    "error",
-                    None,
-                ),
-            )
+        self._ensure_running()
+
+        execution = self.execute_goal(
+            goal
+        )
+
+        recovery = self.analyze_recovery(
+            execution
+        )
+
+        return GoalExecutionResult(
+            execution=execution,
+            recovery=recovery,
         )
 
     # ======================================================
@@ -432,6 +484,10 @@ class Kynka:
     @property
     def planner(self) -> HybridPlanner:
         return self._planner
+
+    @property
+    def plan_recovery(self) -> PlanRecovery:
+        return self._plan_recovery
 
     @property
     def execution_mode_selector(
