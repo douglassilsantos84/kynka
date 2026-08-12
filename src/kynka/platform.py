@@ -11,10 +11,7 @@ from kynka.application.agent import (
 from kynka.application.argument_extractor import (
     ArgumentExtractor,
 )
-from kynka.application.context import (
-    AgentContext,
-    VariableResolver,
-)
+from kynka.application.context import AgentContext
 from kynka.application.execution import (
     ExecutionMode,
     ExecutionModeSelector,
@@ -29,6 +26,7 @@ from kynka.application.intent_router import (
 )
 from kynka.application.memory import (
     ExecutionMemory,
+    ExecutionRecord,
 )
 from kynka.application.planning import (
     DeterministicPlanner,
@@ -43,9 +41,7 @@ from kynka.application.plugin_installer import (
     PluginInstaller,
 )
 from kynka.domain.plugins.plugin import Plugin
-from kynka.infrastructure.providers import (
-    OllamaProvider,
-)
+from kynka.infrastructure.providers import OllamaProvider
 from kynka.kernel.runtime import Runtime
 
 
@@ -63,7 +59,6 @@ class Kynka:
     - extração de argumentos;
     - planejamento;
     - execução de planos;
-    - resolução de variáveis contextuais;
     - seleção automática do modo de execução.
     """
 
@@ -96,16 +91,6 @@ class Kynka:
 
         self._context = AgentContext(
             memory=memory
-        )
-
-        # --------------------------------------------------
-        # Resolução de variáveis contextuais
-        # --------------------------------------------------
-
-        self._variable_resolver = (
-            VariableResolver(
-                self._context
-            )
         )
 
         # --------------------------------------------------
@@ -282,19 +267,9 @@ class Kynka:
     ) -> TaskPlan:
         """
         Cria automaticamente um plano para um objetivo.
-
-        Antes do planejamento, variáveis existentes
-        no contexto são resolvidas para seus valores.
         """
 
         self._ensure_running()
-
-        goal = goal.strip()
-
-        if not goal:
-            raise PlanningError(
-                "O objetivo não pode estar vazio."
-            )
 
         capability_catalog = (
             self._build_capability_catalog()
@@ -306,26 +281,8 @@ class Kynka:
                 "para planejamento."
             )
 
-        # --------------------------------------------------
-        # Resolve variáveis do contexto antes do planner
-        # --------------------------------------------------
-
-        variable_resolution = (
-            self._variable_resolver.resolve(
-                goal
-            )
-        )
-
-        resolved_goal = (
-            variable_resolution.resolved_text
-        )
-
-        # --------------------------------------------------
-        # Planejamento
-        # --------------------------------------------------
-
         return self._planner.plan(
-            goal=resolved_goal,
+            goal=goal,
             available_capabilities=(
                 capability_catalog
             ),
@@ -351,6 +308,9 @@ class Kynka:
     ) -> PlanExecutionResult:
         """
         Planeja e executa um objetivo composto.
+
+        O resultado final do plano é registrado
+        na memória operacional da sessão.
         """
 
         self._ensure_running()
@@ -359,8 +319,50 @@ class Kynka:
             goal
         )
 
-        return self.execute_plan(
+        result = self.execute_plan(
             plan
+        )
+
+        self._record_plan_execution(
+            goal=goal,
+            result=result,
+        )
+
+        return result
+
+    # ======================================================
+    # Memória de planejamento
+    # ======================================================
+
+    def _record_plan_execution(
+        self,
+        goal: str,
+        result: PlanExecutionResult,
+    ) -> None:
+        """
+        Registra o resultado global de um plano
+        na memória operacional da sessão.
+
+        Isso permite que solicitações posteriores
+        utilizem expressões como:
+
+        - esse resultado;
+        - resultado anterior;
+        - último resultado.
+        """
+
+        self._context.memory.add(
+            ExecutionRecord(
+                text=goal,
+                success=result.success,
+                capability="planning.plan",
+                result=result.result,
+                error=getattr(
+                    result,
+                    "error",
+                    None,
+                ),
+            )
         )
 
     # ======================================================

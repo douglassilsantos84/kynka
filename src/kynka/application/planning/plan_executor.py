@@ -13,6 +13,7 @@ from kynka.application.planning.plan_step import (
 )
 from kynka.application.planning.task_plan import (
     TaskPlan,
+    TaskPlanValidationError,
 )
 from kynka.domain.capabilities import CapabilityResult
 from kynka.kernel.runtime import Runtime
@@ -58,6 +59,10 @@ class PlanExecutor:
 
     Cada etapa pode utilizar resultados produzidos
     por etapas anteriores através de ResultReference.
+
+    Antes da execução, o plano é validado
+    estruturalmente e todas as Capabilities são
+    verificadas.
     """
 
     def __init__(
@@ -71,9 +76,13 @@ class PlanExecutor:
         plan: TaskPlan,
     ) -> PlanExecutionResult:
         """
-        Executa todas as etapas de um plano
+        Valida e executa todas as etapas de um plano
         na ordem em que foram definidas.
         """
+
+        # --------------------------------------------------
+        # Plano vazio
+        # --------------------------------------------------
 
         if len(plan) == 0:
             return PlanExecutionResult(
@@ -81,10 +90,50 @@ class PlanExecutor:
                 error="O plano não possui etapas.",
             )
 
+        # --------------------------------------------------
+        # Validação estrutural
+        # --------------------------------------------------
+
+        try:
+            plan.validate()
+
+        except TaskPlanValidationError as error:
+            return PlanExecutionResult(
+                success=False,
+                error=(
+                    "Plano inválido: "
+                    f"{error}"
+                ),
+            )
+
+        # --------------------------------------------------
+        # Validação das Capabilities
+        # --------------------------------------------------
+
+        capability_error = (
+            self._validate_capabilities(
+                plan
+            )
+        )
+
+        if capability_error is not None:
+            return PlanExecutionResult(
+                success=False,
+                error=capability_error,
+            )
+
+        # --------------------------------------------------
+        # Execução
+        # --------------------------------------------------
+
         results: dict[str, Any] = {}
         executions: list[PlanStepExecution] = []
 
         for step in plan:
+            # --------------------------------------------------
+            # Resolução dos argumentos
+            # --------------------------------------------------
+
             try:
                 arguments = self._resolve_arguments(
                     step=step,
@@ -100,13 +149,19 @@ class PlanExecutor:
                     error=str(error),
                 )
 
-                executions.append(execution)
+                executions.append(
+                    execution
+                )
 
                 return PlanExecutionResult(
                     success=False,
                     steps=executions,
                     error=str(error),
                 )
+
+            # --------------------------------------------------
+            # Execução da Capability
+            # --------------------------------------------------
 
             try:
                 capability_result = (
@@ -125,13 +180,19 @@ class PlanExecutor:
                     error=str(error),
                 )
 
-                executions.append(execution)
+                executions.append(
+                    execution
+                )
 
                 return PlanExecutionResult(
                     success=False,
                     steps=executions,
                     error=str(error),
                 )
+
+            # --------------------------------------------------
+            # CapabilityResult
+            # --------------------------------------------------
 
             if isinstance(
                 capability_result,
@@ -146,7 +207,9 @@ class PlanExecutor:
                     error=capability_result.error,
                 )
 
-                executions.append(execution)
+                executions.append(
+                    execution
+                )
 
                 if not capability_result.success:
                     return PlanExecutionResult(
@@ -155,7 +218,13 @@ class PlanExecutor:
                         error=capability_result.error,
                     )
 
-                result_value = capability_result.data
+                result_value = (
+                    capability_result.data
+                )
+
+            # --------------------------------------------------
+            # Resultado direto
+            # --------------------------------------------------
 
             else:
                 execution = PlanStepExecution(
@@ -166,19 +235,63 @@ class PlanExecutor:
                     result=capability_result,
                 )
 
-                executions.append(execution)
+                executions.append(
+                    execution
+                )
 
-                result_value = capability_result
+                result_value = (
+                    capability_result
+                )
+
+            # --------------------------------------------------
+            # Registra resultado da etapa
+            # --------------------------------------------------
 
             results[step.id] = result_value
 
-        final_result = executions[-1].result
+        # --------------------------------------------------
+        # Resultado final
+        # --------------------------------------------------
+
+        final_result = (
+            executions[-1].result
+        )
 
         return PlanExecutionResult(
             success=True,
             steps=executions,
             result=final_result,
         )
+
+    def _validate_capabilities(
+        self,
+        plan: TaskPlan,
+    ) -> str | None:
+        """
+        Verifica se todas as Capabilities utilizadas
+        pelo plano estão registradas no Runtime.
+
+        A validação ocorre antes da execução de
+        qualquer etapa.
+        """
+
+        available_capabilities = (
+            self._runtime.registry.capabilities
+        )
+
+        for step in plan:
+            if (
+                step.capability
+                not in available_capabilities
+            ):
+                return (
+                    "Capability não disponível "
+                    "para execução: "
+                    f"{step.capability!r} "
+                    f"(etapa {step.id!r})."
+                )
+
+        return None
 
     def _resolve_arguments(
         self,
@@ -207,7 +320,15 @@ class PlanExecutor:
     ) -> Any:
         """
         Resolve um valor individual.
+
+        Também suporta estruturas aninhadas,
+        preparando o executor para Capabilities
+        mais complexas.
         """
+
+        # --------------------------------------------------
+        # Referência a resultado anterior
+        # --------------------------------------------------
 
         if isinstance(
             value,
@@ -216,9 +337,65 @@ class PlanExecutor:
             if value.step_id not in results:
                 raise PlanExecutionError(
                     "Resultado da etapa "
-                    f"{value.step_id!r} não está disponível."
+                    f"{value.step_id!r} "
+                    "não está disponível."
                 )
 
-            return results[value.step_id]
+            return results[
+                value.step_id
+            ]
+
+        # --------------------------------------------------
+        # Dicionário
+        # --------------------------------------------------
+
+        if isinstance(
+            value,
+            dict,
+        ):
+            return {
+                key: self._resolve_value(
+                    value=nested_value,
+                    results=results,
+                )
+                for key, nested_value
+                in value.items()
+            }
+
+        # --------------------------------------------------
+        # Lista
+        # --------------------------------------------------
+
+        if isinstance(
+            value,
+            list,
+        ):
+            return [
+                self._resolve_value(
+                    value=item,
+                    results=results,
+                )
+                for item in value
+            ]
+
+        # --------------------------------------------------
+        # Tupla
+        # --------------------------------------------------
+
+        if isinstance(
+            value,
+            tuple,
+        ):
+            return tuple(
+                self._resolve_value(
+                    value=item,
+                    results=results,
+                )
+                for item in value
+            )
+
+        # --------------------------------------------------
+        # Valor comum
+        # --------------------------------------------------
 
         return value
