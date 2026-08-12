@@ -5,6 +5,7 @@ Interface de linha de comando da plataforma Kynka.
 from __future__ import annotations
 
 from kynka import Kynka, __version__
+from kynka.application.planning import PlanExecutionResult
 from kynka.plugins.calculator import CalculatorPlugin
 from kynka.plugins.hello.plugin_v2 import HelloPluginV2
 
@@ -12,10 +13,6 @@ from kynka.plugins.hello.plugin_v2 import HelloPluginV2
 class KynkaCLI:
     """
     Interface interativa de linha de comando da Kynka.
-
-    Esta classe pertence exclusivamente à camada
-    de apresentação. A execução agêntica continua
-    sendo responsabilidade da plataforma.
     """
 
     def __init__(
@@ -23,10 +20,6 @@ class KynkaCLI:
         kynka: Kynka,
     ) -> None:
         self._kynka = kynka
-
-    # --------------------------------------------------
-    # Execução principal
-    # --------------------------------------------------
 
     def run(self) -> None:
         """
@@ -58,10 +51,6 @@ class KynkaCLI:
         print("Sistema finalizado.")
         print()
 
-    # --------------------------------------------------
-    # Plugins
-    # --------------------------------------------------
-
     def _install_plugins(self) -> None:
         """
         Instala os Plugins padrão da CLI.
@@ -74,10 +63,6 @@ class KynkaCLI:
         self._kynka.install(
             CalculatorPlugin()
         )
-
-    # --------------------------------------------------
-    # Loop interativo
-    # --------------------------------------------------
 
     def _interactive_loop(self) -> None:
         """
@@ -109,31 +94,45 @@ class KynkaCLI:
             ):
                 continue
 
-            result = self._kynka.execute(
-                text
-            )
+            try:
+                result = self._kynka.run(
+                    text
+                )
 
-            if result.success:
-                print(result.result)
+            except Exception as error:
+                print(
+                    f"Erro: {error}"
+                )
+                print()
+                continue
 
-            else:
+            if not result.success:
                 print(
                     f"Erro: {result.error}"
                 )
+                print()
+                continue
+
+            if isinstance(
+                result,
+                PlanExecutionResult,
+            ):
+                self._show_plan_result(
+                    result
+                )
+            else:
+                print(
+                    result.result
+                )
 
             print()
-
-    # --------------------------------------------------
-    # Comandos internos
-    # --------------------------------------------------
 
     def _process_internal_command(
         self,
         command: str,
     ) -> bool:
         """
-        Processa comandos pertencentes
-        à própria CLI.
+        Processa comandos pertencentes à própria CLI.
         """
 
         normalized = (
@@ -190,9 +189,26 @@ class KynkaCLI:
 
         return False
 
-    # --------------------------------------------------
-    # Banner
-    # --------------------------------------------------
+    def _show_plan_result(
+        self,
+        result: PlanExecutionResult,
+    ) -> None:
+        """
+        Exibe o resultado de uma execução planejada.
+        """
+
+        print(
+            f"Resultado: {result.result}"
+        )
+
+        print("Etapas:")
+
+        for step in result.steps:
+            print(
+                f"  {step.step_id}: "
+                f"{step.capability} "
+                f"-> {step.result}"
+            )
 
     def _show_banner(self) -> None:
         """
@@ -201,17 +217,11 @@ class KynkaCLI:
 
         print()
         print("=" * 50)
-
         print(
             f"KYNKA PLATFORM {__version__}"
         )
-
         print("=" * 50)
         print()
-
-    # --------------------------------------------------
-    # Status
-    # --------------------------------------------------
 
     def _show_status(self) -> None:
         """
@@ -244,10 +254,6 @@ class KynkaCLI:
 
         print()
 
-    # --------------------------------------------------
-    # Plugins
-    # --------------------------------------------------
-
     def _show_plugins(self) -> None:
         """
         Lista os Plugins instalados.
@@ -259,12 +265,10 @@ class KynkaCLI:
             print(
                 "Nenhum Plugin instalado."
             )
-
         else:
             print(
                 "Plugins instalados:"
             )
-            print()
 
             for plugin in self._kynka.plugins:
                 print(
@@ -272,10 +276,6 @@ class KynkaCLI:
                 )
 
         print()
-
-    # --------------------------------------------------
-    # Capabilities
-    # --------------------------------------------------
 
     def _show_capabilities(self) -> None:
         """
@@ -288,12 +288,10 @@ class KynkaCLI:
             print(
                 "Nenhuma Capability disponível."
             )
-
         else:
             print(
                 "Capabilities disponíveis:"
             )
-            print()
 
             for capability in (
                 self._kynka.capabilities
@@ -304,14 +302,10 @@ class KynkaCLI:
 
         print()
 
-    # --------------------------------------------------
-    # Memória
-    # --------------------------------------------------
-
     def _show_memory(self) -> None:
         """
-        Exibe o histórico de execuções
-        armazenado na memória da sessão.
+        Exibe o histórico de execuções armazenado
+        na memória da sessão.
         """
 
         records = (
@@ -353,10 +347,8 @@ class KynkaCLI:
 
             if record.success:
                 print(
-                    "   Resultado: "
-                    f"{record.result}"
+                    f"   Resultado: {record.result}"
                 )
-
             else:
                 print(
                     f"   Erro: {record.error}"
@@ -381,22 +373,17 @@ class KynkaCLI:
             print(
                 "A memória já estava vazia."
             )
-
         else:
             print(
-                "Memória da sessão limpa."
+                f"{quantity} execuções removidas."
             )
 
         print()
 
-    # --------------------------------------------------
-    # Variáveis
-    # --------------------------------------------------
-
     def _show_variables(self) -> None:
         """
-        Exibe as variáveis armazenadas
-        no contexto atual.
+        Lista as variáveis armazenadas
+        no contexto da sessão.
         """
 
         variables = (
@@ -417,11 +404,11 @@ class KynkaCLI:
         )
         print()
 
-        for name, value in sorted(
+        for name, value in (
             variables.items()
         ):
             print(
-                f"  {name} = {value}"
+                f"{name} = {value}"
             )
 
         print()
@@ -436,22 +423,18 @@ class KynkaCLI:
             self._kynka.context.variables
         )
 
+        self._kynka.context.clear_variables()
+
         print()
 
         if quantity == 0:
             print(
-                "Não existem variáveis para limpar."
+                "Nenhuma variável para remover."
             )
-            print()
-            return
-
-        self._kynka.context.clear_variables()
-
-        if quantity == 1:
+        elif quantity == 1:
             print(
                 "1 variável removida."
             )
-
         else:
             print(
                 f"{quantity} variáveis removidas."
@@ -459,23 +442,14 @@ class KynkaCLI:
 
         print()
 
-    # --------------------------------------------------
-    # Contexto
-    # --------------------------------------------------
-
     def _show_context(self) -> None:
         """
-        Exibe um resumo do contexto
-        atual da sessão.
+        Exibe o contexto atual da sessão.
         """
 
-        variables = (
-            self._kynka.context.variables
-        )
-
-        memory = (
-            self._kynka.memory
-        )
+        context = self._kynka.context
+        variables = context.variables
+        memory = context.memory
 
         print()
         print(
@@ -484,66 +458,52 @@ class KynkaCLI:
         print()
 
         print(
-            "  Variáveis: "
-            f"{len(variables)}"
+            f"Variáveis: {len(variables)}"
         )
 
         print(
-            "  Execuções na memória: "
+            "Execuções na memória: "
             f"{len(memory)}"
         )
 
         last = memory.last
 
-        if last is None:
+        if last is not None:
             print(
-                "  Última execução: nenhuma"
+                f"Última execução: {last.text}"
             )
 
-        else:
-            print(
-                "  Última execução: "
-                f"{last.text}"
-            )
-
-            print(
-                "  Último status: "
-                f"{'sucesso' if last.success else 'erro'}"
-            )
+            if last.success:
+                print(
+                    "Último status: sucesso"
+                )
+            else:
+                print(
+                    "Último status: erro"
+                )
 
         last_successful = (
             memory.last_successful
         )
 
-        if last_successful is None:
+        if last_successful is not None:
             print(
-                "  Último resultado: nenhum"
-            )
-
-        else:
-            print(
-                "  Último resultado: "
+                "Último resultado: "
                 f"{last_successful.result}"
             )
 
         if variables:
             print()
-            print(
-                "  Estado:"
-            )
+            print("Estado:")
 
-            for name, value in sorted(
+            for name, value in (
                 variables.items()
             ):
                 print(
-                    f"    {name} = {value}"
+                    f"{name} = {value}"
                 )
 
         print()
-
-    # --------------------------------------------------
-    # Ajuda
-    # --------------------------------------------------
 
     @staticmethod
     def _show_help() -> None:
@@ -555,7 +515,6 @@ class KynkaCLI:
         print(
             "Comandos disponíveis:"
         )
-        print()
 
         print(
             "  ajuda             "

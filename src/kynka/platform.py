@@ -13,6 +13,11 @@ from kynka.application.argument_extractor import (
 )
 from kynka.application.context import (
     AgentContext,
+    VariableResolver,
+)
+from kynka.application.execution import (
+    ExecutionMode,
+    ExecutionModeSelector,
 )
 from kynka.application.hybrid_argument_extractor import (
     HybridArgumentExtractor,
@@ -24,6 +29,15 @@ from kynka.application.intent_router import (
 )
 from kynka.application.memory import (
     ExecutionMemory,
+)
+from kynka.application.planning import (
+    DeterministicPlanner,
+    HybridPlanner,
+    LLMPlanner,
+    PlanExecutionResult,
+    PlanExecutor,
+    PlanningError,
+    TaskPlan,
 )
 from kynka.application.plugin_installer import (
     PluginInstaller,
@@ -39,8 +53,18 @@ class Kynka:
     """
     Fachada principal da plataforma Kynka.
 
-    Centraliza os subsistemas necessários
-    para execução agêntica.
+    Centraliza:
+
+    - Runtime;
+    - Plugins;
+    - AgentExecutor;
+    - contexto e memória;
+    - roteamento;
+    - extração de argumentos;
+    - planejamento;
+    - execução de planos;
+    - resolução de variáveis contextuais;
+    - seleção automática do modo de execução.
     """
 
     def __init__(
@@ -63,7 +87,7 @@ class Kynka:
         )
 
         # --------------------------------------------------
-        # Contexto
+        # Contexto e memória
         # --------------------------------------------------
 
         memory = ExecutionMemory(
@@ -75,7 +99,17 @@ class Kynka:
         )
 
         # --------------------------------------------------
-        # Argument extraction
+        # Resolução de variáveis contextuais
+        # --------------------------------------------------
+
+        self._variable_resolver = (
+            VariableResolver(
+                self._context
+            )
+        )
+
+        # --------------------------------------------------
+        # Extração de argumentos
         # --------------------------------------------------
 
         self._argument_extractor = (
@@ -87,20 +121,18 @@ class Kynka:
         )
 
         # --------------------------------------------------
-        # Intent routing
+        # Roteamento
         # --------------------------------------------------
 
         self._router = HybridIntentRouter(
-            deterministic_router=(
-                IntentRouter()
-            ),
+            deterministic_router=IntentRouter(),
             llm_router=LLMIntentRouter(
                 self._provider
             ),
         )
 
         # --------------------------------------------------
-        # Plugin installation
+        # Plugins
         # --------------------------------------------------
 
         self._installer = PluginInstaller(
@@ -123,6 +155,41 @@ class Kynka:
             context=self._context,
         )
 
+        # --------------------------------------------------
+        # Planning
+        # --------------------------------------------------
+
+        self._deterministic_planner = (
+            DeterministicPlanner()
+        )
+
+        self._llm_planner = LLMPlanner(
+            self._provider
+        )
+
+        self._planner = HybridPlanner(
+            deterministic_planner=(
+                self._deterministic_planner
+            ),
+            llm_planner=self._llm_planner,
+        )
+
+        self._plan_executor = PlanExecutor(
+            self._runtime
+        )
+
+        # --------------------------------------------------
+        # Seleção do modo de execução
+        # --------------------------------------------------
+
+        self._execution_mode_selector = (
+            ExecutionModeSelector()
+        )
+
+    # ======================================================
+    # Ciclo de vida
+    # ======================================================
+
     def start(self) -> None:
         """
         Inicia a plataforma.
@@ -137,6 +204,10 @@ class Kynka:
 
         self._runtime.stop()
 
+    # ======================================================
+    # Plugins
+    # ======================================================
+
     def install(
         self,
         plugin: Plugin,
@@ -149,13 +220,169 @@ class Kynka:
             plugin
         )
 
+    # ======================================================
+    # Entrada unificada
+    # ======================================================
+
+    def run(
+        self,
+        text: str,
+    ) -> AgentExecutionResult | PlanExecutionResult:
+        """
+        Executa uma solicitação automaticamente.
+
+        A plataforma decide se deve utilizar:
+
+        - execução simples;
+        - planejamento multi-step.
+        """
+
+        self._ensure_running()
+
+        mode = (
+            self._execution_mode_selector.select(
+                text
+            )
+        )
+
+        if mode is ExecutionMode.PLAN:
+            return self.execute_goal(
+                text
+            )
+
+        return self.execute(
+            text
+        )
+
+    # ======================================================
+    # Execução simples
+    # ======================================================
+
     def execute(
         self,
         text: str,
     ) -> AgentExecutionResult:
         """
-        Executa uma solicitação em
-        linguagem natural.
+        Executa uma solicitação individual.
+        """
+
+        self._ensure_running()
+
+        return self._agent.execute(
+            text
+        )
+
+    # ======================================================
+    # Planning
+    # ======================================================
+
+    def plan(
+        self,
+        goal: str,
+    ) -> TaskPlan:
+        """
+        Cria automaticamente um plano para um objetivo.
+
+        Antes do planejamento, variáveis existentes
+        no contexto são resolvidas para seus valores.
+        """
+
+        self._ensure_running()
+
+        goal = goal.strip()
+
+        if not goal:
+            raise PlanningError(
+                "O objetivo não pode estar vazio."
+            )
+
+        capability_catalog = (
+            self._build_capability_catalog()
+        )
+
+        if not capability_catalog:
+            raise PlanningError(
+                "Nenhuma Capability está disponível "
+                "para planejamento."
+            )
+
+        # --------------------------------------------------
+        # Resolve variáveis do contexto antes do planner
+        # --------------------------------------------------
+
+        variable_resolution = (
+            self._variable_resolver.resolve(
+                goal
+            )
+        )
+
+        resolved_goal = (
+            variable_resolution.resolved_text
+        )
+
+        # --------------------------------------------------
+        # Planejamento
+        # --------------------------------------------------
+
+        return self._planner.plan(
+            goal=resolved_goal,
+            available_capabilities=(
+                capability_catalog
+            ),
+        )
+
+    def execute_plan(
+        self,
+        plan: TaskPlan,
+    ) -> PlanExecutionResult:
+        """
+        Executa um plano previamente criado.
+        """
+
+        self._ensure_running()
+
+        return self._plan_executor.execute(
+            plan
+        )
+
+    def execute_goal(
+        self,
+        goal: str,
+    ) -> PlanExecutionResult:
+        """
+        Planeja e executa um objetivo composto.
+        """
+
+        self._ensure_running()
+
+        plan = self.plan(
+            goal
+        )
+
+        return self.execute_plan(
+            plan
+        )
+
+    # ======================================================
+    # Utilidades internas
+    # ======================================================
+
+    def _build_capability_catalog(
+        self,
+    ) -> dict[str, str]:
+        """
+        Constrói o catálogo de Capabilities disponíveis.
+        """
+
+        return {
+            name: capability.metadata.description
+            for name, capability
+            in self._runtime.registry.capabilities.items()
+        }
+
+    def _ensure_running(self) -> None:
+        """
+        Garante que a plataforma esteja iniciada.
         """
 
         if not self._runtime.is_running:
@@ -164,9 +391,9 @@ class Kynka:
                 "não está iniciada."
             )
 
-        return self._agent.execute(
-            text
-        )
+    # ======================================================
+    # Propriedades
+    # ======================================================
 
     @property
     def runtime(self) -> Runtime:
@@ -174,19 +401,10 @@ class Kynka:
 
     @property
     def context(self) -> AgentContext:
-        """
-        Retorna o contexto da sessão.
-        """
-
         return self._context
 
     @property
     def memory(self) -> ExecutionMemory:
-        """
-        Atalho para a memória armazenada
-        no AgentContext.
-        """
-
         return self._context.memory
 
     @property
@@ -194,8 +412,7 @@ class Kynka:
         self,
     ) -> tuple[str, ...]:
         return tuple(
-            self._runtime.registry
-            .plugins.keys()
+            self._runtime.registry.plugins.keys()
         )
 
     @property
@@ -203,10 +420,19 @@ class Kynka:
         self,
     ) -> tuple[str, ...]:
         return tuple(
-            self._runtime.registry
-            .capabilities.keys()
+            self._runtime.registry.capabilities.keys()
         )
 
     @property
     def model(self) -> str:
         return self._provider.model
+
+    @property
+    def planner(self) -> HybridPlanner:
+        return self._planner
+
+    @property
+    def execution_mode_selector(
+        self,
+    ) -> ExecutionModeSelector:
+        return self._execution_mode_selector
