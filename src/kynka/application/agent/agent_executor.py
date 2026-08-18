@@ -7,6 +7,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from kynka.application.assistant import (
+    GeneralAssistant,
+    GeneralAssistantError,
+)
 from kynka.application.context import (
     AgentContext,
     ContextCommandHandler,
@@ -48,8 +52,15 @@ class AgentExecutionResult:
 
 class AgentExecutor:
     """
-    Coordena contexto, variáveis, roteamento,
-    extração de argumentos, execução e memória.
+    Coordena:
+
+    - contexto;
+    - variáveis;
+    - roteamento;
+    - extração de argumentos;
+    - execução;
+    - fallback conversacional;
+    - memória.
     """
 
     def __init__(
@@ -58,11 +69,13 @@ class AgentExecutor:
         router: Any,
         argument_extractor: Any,
         context: AgentContext,
+        assistant: GeneralAssistant | None = None,
     ) -> None:
         self._runtime = runtime
         self._router = router
         self._argument_extractor = argument_extractor
         self._context = context
+        self._assistant = assistant
 
         self._context_resolver = ContextResolver(
             self._context
@@ -123,9 +136,9 @@ class AgentExecutor:
         original_text: str,
     ) -> AgentExecutionResult:
 
-        # --------------------------------------------------
+        # ==================================================
         # 1. Comandos contextuais
-        # --------------------------------------------------
+        # ==================================================
 
         context_command = (
             self._context_command_handler.handle(
@@ -148,9 +161,9 @@ class AgentExecutor:
                 operational=False,
             )
 
-        # --------------------------------------------------
+        # ==================================================
         # 2. Resultado anterior
-        # --------------------------------------------------
+        # ==================================================
 
         try:
             context_resolution = (
@@ -172,9 +185,9 @@ class AgentExecutor:
             context_resolution.resolved_text
         )
 
-        # --------------------------------------------------
+        # ==================================================
         # 3. Variáveis nomeadas
-        # --------------------------------------------------
+        # ==================================================
 
         variable_resolution = (
             self._variable_resolver.resolve(
@@ -186,17 +199,17 @@ class AgentExecutor:
             variable_resolution.resolved_text
         )
 
-        # --------------------------------------------------
-        # 4. Catálogo de Capabilities
-        # --------------------------------------------------
+        # ==================================================
+        # 4. Catálogo
+        # ==================================================
 
         capability_catalog = (
             self._build_capability_catalog()
         )
 
-        # --------------------------------------------------
+        # ==================================================
         # 5. Roteamento
-        # --------------------------------------------------
+        # ==================================================
 
         try:
             route = self._router.route(
@@ -206,18 +219,14 @@ class AgentExecutor:
                 ),
             )
 
-        except IntentNotFoundError as error:
-            return self._finish(
-                AgentExecutionResult(
-                    success=False,
-                    text=original_text,
-                    error=str(error),
-                )
+        except IntentNotFoundError:
+            return self._execute_fallback(
+                original_text
             )
 
-        # --------------------------------------------------
+        # ==================================================
         # 6. Capability
-        # --------------------------------------------------
+        # ==================================================
 
         try:
             capability = (
@@ -237,9 +246,9 @@ class AgentExecutor:
                 )
             )
 
-        # --------------------------------------------------
+        # ==================================================
         # 7. Parâmetros
-        # --------------------------------------------------
+        # ==================================================
 
         parameters = {
             parameter.name:
@@ -248,15 +257,19 @@ class AgentExecutor:
             in capability.metadata.parameters
         }
 
-        # --------------------------------------------------
-        # 8. Extração de argumentos
-        # --------------------------------------------------
+        # ==================================================
+        # 8. Extração
+        # ==================================================
 
         try:
-            arguments = self._extract_arguments(
-                text=execution_text,
-                capability_name=capability.name,
-                parameters=parameters,
+            arguments = (
+                self._extract_arguments(
+                    text=execution_text,
+                    capability_name=(
+                        capability.name
+                    ),
+                    parameters=parameters,
+                )
             )
 
         except Exception as error:
@@ -269,9 +282,9 @@ class AgentExecutor:
                 )
             )
 
-        # --------------------------------------------------
+        # ==================================================
         # 9. Execução
-        # --------------------------------------------------
+        # ==================================================
 
         try:
             execution_result = (
@@ -292,9 +305,9 @@ class AgentExecutor:
                 )
             )
 
-        # --------------------------------------------------
+        # ==================================================
         # 10. CapabilityResult
-        # --------------------------------------------------
+        # ==================================================
 
         if isinstance(
             execution_result,
@@ -302,7 +315,9 @@ class AgentExecutor:
         ):
             return self._finish(
                 AgentExecutionResult(
-                    success=execution_result.success,
+                    success=(
+                        execution_result.success
+                    ),
                     text=original_text,
                     capability=capability.name,
                     arguments=arguments,
@@ -311,9 +326,9 @@ class AgentExecutor:
                 )
             )
 
-        # --------------------------------------------------
+        # ==================================================
         # 11. Resultado genérico
-        # --------------------------------------------------
+        # ==================================================
 
         return self._finish(
             AgentExecutionResult(
@@ -325,6 +340,62 @@ class AgentExecutor:
             )
         )
 
+    def _execute_fallback(
+        self,
+        original_text: str,
+    ) -> AgentExecutionResult:
+        """
+        Usa o assistente geral quando nenhuma
+        Capability adequada foi encontrada.
+        """
+
+        if self._assistant is None:
+            return self._finish(
+                AgentExecutionResult(
+                    success=False,
+                    text=original_text,
+                    error=(
+                        "Nenhuma Capability adequada "
+                        "foi encontrada."
+                    ),
+                )
+            )
+
+        try:
+            answer = self._assistant.answer(
+                original_text
+            )
+
+        except GeneralAssistantError as error:
+            return self._finish(
+                AgentExecutionResult(
+                    success=False,
+                    text=original_text,
+                    capability="assistant.general",
+                    error=str(error),
+                )
+            )
+
+        except Exception as error:
+            return self._finish(
+                AgentExecutionResult(
+                    success=False,
+                    text=original_text,
+                    capability="assistant.general",
+                    error=str(error),
+                )
+            )
+
+        return self._finish(
+            AgentExecutionResult(
+                success=True,
+                text=original_text,
+                capability="assistant.general",
+                arguments={},
+                result=answer,
+            )
+        )
+
     def _finish(
         self,
         result: AgentExecutionResult,
@@ -332,12 +403,7 @@ class AgentExecutor:
         operational: bool = True,
     ) -> AgentExecutionResult:
         """
-        Finaliza uma execução e registra o resultado
-        na memória da sessão.
-
-        operational=False indica que o registro pertence
-        ao controle/contexto da sessão e não deve substituir
-        o último resultado operacional.
+        Registra o resultado na memória.
         """
 
         self._context.memory.add(

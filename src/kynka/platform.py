@@ -13,6 +13,9 @@ from kynka.application.agent import (
 from kynka.application.argument_extractor import (
     ArgumentExtractor,
 )
+from kynka.application.assistant import (
+    GeneralAssistant,
+)
 from kynka.application.context import (
     AgentContext,
 )
@@ -94,6 +97,7 @@ class Kynka:
     - Runtime;
     - Plugins;
     - AgentExecutor;
+    - assistente geral;
     - contexto e memória;
     - roteamento;
     - extração de argumentos;
@@ -120,6 +124,14 @@ class Kynka:
 
         self._provider = OllamaProvider(
             model=model
+        )
+
+        # --------------------------------------------------
+        # Assistente geral
+        # --------------------------------------------------
+
+        self._assistant = GeneralAssistant(
+            self._provider
         )
 
         # --------------------------------------------------
@@ -179,6 +191,7 @@ class Kynka:
                 self._argument_extractor
             ),
             context=self._context,
+            assistant=self._assistant,
         )
 
         # --------------------------------------------------
@@ -296,6 +309,9 @@ class Kynka:
     ) -> AgentExecutionResult:
         """
         Executa uma solicitação individual.
+
+        Quando nenhuma Capability adequada é encontrada,
+        o AgentExecutor pode utilizar o assistente geral.
         """
 
         self._ensure_running()
@@ -480,6 +496,10 @@ class Kynka:
     @property
     def model(self) -> str:
         return self._provider.model
+
+    @property
+    def assistant(self) -> GeneralAssistant:
+        return self._assistant
 
     @property
     def planner(self) -> HybridPlanner:
