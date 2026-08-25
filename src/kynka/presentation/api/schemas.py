@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -106,6 +107,44 @@ class HealthResponse(BaseModel):
 # ============================================================
 
 
+class MaterialCreateRequest(BaseModel):
+    code: str = Field(
+        min_length=1,
+        max_length=100,
+    )
+    name: str = Field(
+        min_length=1,
+        max_length=300,
+    )
+    quantity: float = Field(
+        default=0,
+        ge=0,
+    )
+    unit: str = Field(
+        default="un",
+        max_length=50,
+    )
+    minimum_quantity: float = Field(
+        default=0,
+        ge=0,
+    )
+
+
+class MaterialUpdateRequest(BaseModel):
+    name: str = Field(
+        min_length=1,
+        max_length=300,
+    )
+    unit: str = Field(
+        default="un",
+        max_length=50,
+    )
+    minimum_quantity: float = Field(
+        default=0,
+        ge=0,
+    )
+
+
 class MaterialResponse(BaseModel):
     code: str
     name: str
@@ -129,3 +168,221 @@ class InventoryImportResponse(BaseModel):
         default_factory=list
     )
     summary: InventorySummaryResponse
+
+
+class InventoryMovementRequest(BaseModel):
+    type: Literal[
+        "entry",
+        "exit",
+        "adjustment",
+    ]
+
+    quantity: float = Field(
+        ge=0,
+    )
+
+    reason: str = Field(
+        default="",
+        max_length=500,
+    )
+
+
+class InventoryMovementResponse(BaseModel):
+    id: int
+    material_code: str
+
+    type: Literal[
+        "entry",
+        "exit",
+        "adjustment",
+    ]
+
+    quantity: float
+    previous_quantity: float
+    new_quantity: float
+    reason: str
+    created_at: datetime
+
+# ============================================================
+# Demands / Projects
+# ============================================================
+
+
+class DemandCreateRequest(BaseModel):
+    code: str = Field(
+        min_length=1,
+        max_length=100,
+    )
+
+    name: str = Field(
+        min_length=1,
+        max_length=300,
+    )
+
+    kind: str = Field(
+        default="project",
+        min_length=1,
+        max_length=100,
+    )
+
+    client: str = Field(
+        default="",
+        max_length=300,
+    )
+
+    location: str = Field(
+        default="",
+        max_length=500,
+    )
+
+    start_date: str | None = None
+
+    notes: str = Field(
+        default="",
+        max_length=2000,
+    )
+
+
+class DemandResponse(BaseModel):
+    id: int
+    code: str
+    name: str
+    kind: str
+    client: str
+    location: str
+    start_date: str | None = None
+    status: str
+    notes: str
+    created_at: datetime | None = None
+
+
+class DemandRequirementRequest(BaseModel):
+    material_code: str = Field(
+        min_length=1,
+        max_length=100,
+    )
+
+    required_quantity: float = Field(
+        gt=0,
+    )
+
+
+class DemandRequirementResponse(BaseModel):
+    id: int
+    demand_id: int
+    material_code: str
+    required_quantity: float
+
+
+class StockReservationResponse(BaseModel):
+    id: int
+    demand_id: int
+    material_code: str
+    quantity: float
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class DemandPlanItemResponse(BaseModel):
+    material_code: str
+    material_name: str
+    unit: str
+
+    required_quantity: float
+
+    physical_quantity: float
+    minimum_quantity: float
+
+    reserved_total: float
+    reserved_for_this_demand: float
+    reserved_for_other_demands: float
+
+    free_quantity: float
+
+    quantity_still_required: float
+    quantity_available_to_reserve: float
+
+    shortage_quantity: float
+
+    fully_available: bool
+
+
+class DemandPlanResponse(BaseModel):
+    demand_id: int
+    demand_code: str
+    demand_name: str
+
+    total_items: int
+    available_items: int
+    shortage_items: int
+
+    items: list[DemandPlanItemResponse] = Field(
+        default_factory=list
+    )
+
+# ============================================================
+# Quantity Map Import
+# ============================================================
+
+
+class QuantityMapMissingMaterialResponse(BaseModel):
+    row: int
+    code: str
+    name: str
+    quantity: float
+    unit: str
+
+
+class QuantityMapImportResponse(BaseModel):
+    filename: str
+    demand_id: int
+
+    total_rows: int
+    imported: int
+    skipped: int
+
+    missing_materials: list[
+        QuantityMapMissingMaterialResponse
+    ] = Field(default_factory=list)
+
+    errors: list[str] = Field(
+        default_factory=list
+    )
+
+
+# ============================================================
+# Missing material resolution
+# ============================================================
+
+
+class MissingMaterialResolveRequest(BaseModel):
+    code: str = Field(
+        min_length=1,
+        max_length=100,
+    )
+    name: str = Field(
+        min_length=1,
+        max_length=300,
+    )
+    quantity: float = Field(
+        default=0,
+        ge=0,
+    )
+    unit: str = Field(
+        default="un",
+        min_length=1,
+        max_length=50,
+    )
+    minimum_quantity: float = Field(
+        default=0,
+        ge=0,
+    )
+    required_quantity: float = Field(
+        gt=0,
+    )
+
+
+class MissingMaterialResolveResponse(BaseModel):
+    material: MaterialResponse
+    requirement: DemandRequirementResponse
+    plan: DemandPlanResponse

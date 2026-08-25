@@ -6,16 +6,16 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
+from .inventory_movement import InventoryMovement
 from .material import Material
 
 
 class InventoryRepository(ABC):
     """
-    Define as operações de persistência necessárias
-    para o inventário.
+    Define o contrato de persistência do inventário.
 
-    O domínio não conhece SQLite, Excel, ERP
-    ou qualquer outra tecnologia de armazenamento.
+    O domínio não conhece SQLite, Excel, ERP ou qualquer
+    outra tecnologia concreta de armazenamento.
     """
 
     @abstractmethod
@@ -25,6 +25,17 @@ class InventoryRepository(ABC):
     ) -> None:
         """
         Cria ou atualiza um material.
+        """
+
+    @abstractmethod
+    def delete(
+        self,
+        code: str,
+    ) -> bool:
+        """
+        Exclui um material.
+
+        Retorna True quando o material existia.
         """
 
     @abstractmethod
@@ -51,4 +62,34 @@ class InventoryRepository(ABC):
     ) -> list[Material]:
         """
         Retorna todos os materiais.
+        """
+
+    @abstractmethod
+    def save_movement(
+        self,
+        movement: InventoryMovement,
+    ) -> InventoryMovement:
+        """
+        Persiste uma movimentação.
+        """
+
+    @abstractmethod
+    def apply_movement(
+        self,
+        material: Material,
+        movement: InventoryMovement,
+    ) -> InventoryMovement:
+        """
+        Atualiza o saldo e registra a movimentação
+        na mesma transação.
+        """
+
+    @abstractmethod
+    def list_movements(
+        self,
+        material_code: str | None = None,
+        limit: int = 100,
+    ) -> list[InventoryMovement]:
+        """
+        Lista o histórico de movimentações.
         """

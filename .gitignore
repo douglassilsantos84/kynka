@@ -1,30 +1,34 @@
 # ==========================================
-# Python
+# Kynka - Git Ignore
 # ==========================================
 
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
 
-# Virtual Environment
+# Virtual environments
 .venv/
 venv/
 env/
 
-# Distribution
+# Environment variables / secrets
+.env
+.env.*
+!.env.example
+
+# Distribution / packaging
 build/
 dist/
 *.egg-info/
 
-# Testing
+# Testing / coverage
 .pytest_cache/
 .coverage
 htmlcov/
 
-# Type Checking
+# Type checking / lint
 .mypy_cache/
-
-# Lint
 .ruff_cache/
 
 # IDE
@@ -35,6 +39,20 @@ htmlcov/
 logs/
 *.log
 
-# OS
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Local spreadsheets / test data
+*.xlsx
+*.xls
+
+# Temporary / snapshot files
+*_snapshot.txt
+*_clean.txt
+etapa*_backend_atual.txt
+
+# Operating system
 Thumbs.db
 .DS_Store

@@ -1,15 +1,15 @@
-"""
-Aplicação de inventário da plataforma Kynka.
-"""
-
 from .inventory_service import (
+    InsufficientStockError,
     InventoryService,
     InventorySummary,
+    MaterialAlreadyExistsError,
     MaterialNotFoundError,
 )
 
 __all__ = [
+    "InsufficientStockError",
     "InventoryService",
     "InventorySummary",
+    "MaterialAlreadyExistsError",
     "MaterialNotFoundError",
 ]
