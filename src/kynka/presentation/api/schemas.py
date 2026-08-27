@@ -386,3 +386,60 @@ class MissingMaterialResolveResponse(BaseModel):
     material: MaterialResponse
     requirement: DemandRequirementResponse
     plan: DemandPlanResponse
+
+
+# ============================================================
+# Procurement / Purchase lists
+# ============================================================
+class PurchaseDemandShareResponse(BaseModel):
+    demand_id:int; demand_code:str; demand_name:str
+    required_quantity:float; reserved_quantity:float; remaining_quantity:float
+class PurchaseListItemResponse(BaseModel):
+    material_code:str; material_name:str; unit:str
+    required_quantity:float; reserved_quantity:float
+    physical_quantity:float; minimum_quantity:float; reserved_total:float; free_quantity:float
+    quantity_to_buy:float
+    demands:list[PurchaseDemandShareResponse]=Field(default_factory=list)
+class PurchaseListResponse(BaseModel):
+    demand_ids:list[int]=Field(default_factory=list); demand_codes:list[str]=Field(default_factory=list)
+    total_materials:int; materials_to_buy:int
+    items:list[PurchaseListItemResponse]=Field(default_factory=list)
+    analysis:str
+class ConsolidatedPurchaseListRequest(BaseModel):
+    demand_ids:list[int]|None=None
+
+
+# ============================================================
+# Purchase Orders / Receiving
+# ============================================================
+
+
+class PurchaseOrderCreateRequest(BaseModel):
+    demand_ids: list[int] | None = None
+    notes: str = Field(default="", max_length=2000)
+
+
+class PurchaseOrderReceiveRequest(BaseModel):
+    quantity: float = Field(gt=0)
+
+
+class PurchaseOrderItemResponse(BaseModel):
+    id: int
+    material_code: str
+    material_name: str
+    unit: str
+    quantity_ordered: float
+    quantity_received: float
+    quantity_pending: float
+
+
+class PurchaseOrderResponse(BaseModel):
+    id: int
+    status: str
+    demand_ids: list[int] = Field(default_factory=list)
+    demand_codes: list[str] = Field(default_factory=list)
+    notes: str
+    created_at: str
+    ordered_at: str | None = None
+    completed_at: str | None = None
+    items: list[PurchaseOrderItemResponse] = Field(default_factory=list)

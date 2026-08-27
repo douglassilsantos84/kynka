@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import shutil
 import tempfile
@@ -30,6 +30,14 @@ from kynka.application.demand.importers import (
     QuantityMapImporter,
 )
 
+from kynka.application.procurement import (
+    ProcurementService,
+    PurchaseOrderDuplicateError,
+    PurchaseOrderNotFoundError,
+    PurchaseOrderService,
+    PurchaseOrderStateError,
+)
+
 from kynka.application.inventory import (
     InsufficientStockError,
     InventoryService,
@@ -47,6 +55,10 @@ from kynka.infrastructure.demand import (
 
 from kynka.infrastructure.inventory import (
     SQLiteInventoryRepository,
+)
+
+from kynka.infrastructure.procurement import (
+    SQLitePurchaseOrderRepository,
 )
 
 from .config import APISettings
@@ -75,6 +87,14 @@ from .schemas import (
     InventoryMovementResponse,
     QuantityMapImportResponse,
     QuantityMapMissingMaterialResponse,
+    ConsolidatedPurchaseListRequest,
+    PurchaseDemandShareResponse,
+    PurchaseListItemResponse,
+    PurchaseListResponse,
+    PurchaseOrderCreateRequest,
+    PurchaseOrderItemResponse,
+    PurchaseOrderReceiveRequest,
+    PurchaseOrderResponse,
     StatusResponse,
     StockReservationResponse,
     VariablesResponse,
@@ -167,6 +187,21 @@ def create_app(
         demand_service,
     )
 
+    procurement_service = ProcurementService(
+        demand_repository,
+        inventory_repository,
+    )
+
+    purchase_order_repository = SQLitePurchaseOrderRepository(
+        DATABASE_PATH
+    )
+
+    purchase_order_service = PurchaseOrderService(
+        purchase_order_repository,
+        procurement_service,
+        inventory_service,
+    )
+
     # ========================================================
     # Quantity Map Importer
     # ========================================================
@@ -206,6 +241,15 @@ def create_app(
 
     api.state.missing_material_service = (
         missing_material_service
+    )
+
+    api.state.procurement_service = (
+        procurement_service
+    )
+
+
+    api.state.purchase_order_service = (
+        purchase_order_service
     )
 
     api.state.quantity_map_importer = (
@@ -400,6 +444,46 @@ def create_app(
             ],
         )
 
+    def purchase_list_response(purchase_list) -> PurchaseListResponse:
+        return PurchaseListResponse(
+            demand_ids=purchase_list.demand_ids, demand_codes=purchase_list.demand_codes,
+            total_materials=purchase_list.total_materials, materials_to_buy=purchase_list.materials_to_buy,
+            items=[PurchaseListItemResponse(
+                material_code=i.material_code, material_name=i.material_name, unit=i.unit,
+                required_quantity=i.required_quantity, reserved_quantity=i.reserved_quantity,
+                physical_quantity=i.physical_quantity, minimum_quantity=i.minimum_quantity,
+                reserved_total=i.reserved_total, free_quantity=i.free_quantity, quantity_to_buy=i.quantity_to_buy,
+                demands=[PurchaseDemandShareResponse(
+                    demand_id=d.demand_id,demand_code=d.demand_code,demand_name=d.demand_name,
+                    required_quantity=d.required_quantity,reserved_quantity=d.reserved_quantity,remaining_quantity=d.remaining_quantity
+                ) for d in i.demands]
+            ) for i in purchase_list.items], analysis=purchase_list.analysis
+        )
+
+    def purchase_order_response(order) -> PurchaseOrderResponse:
+        return PurchaseOrderResponse(
+            id=order.id,
+            status=order.status,
+            demand_ids=order.demand_ids,
+            demand_codes=order.demand_codes,
+            notes=order.notes,
+            created_at=order.created_at,
+            ordered_at=order.ordered_at,
+            completed_at=order.completed_at,
+            items=[
+                PurchaseOrderItemResponse(
+                    id=item.id,
+                    material_code=item.material_code,
+                    material_name=item.material_name,
+                    unit=item.unit,
+                    quantity_ordered=item.quantity_ordered,
+                    quantity_received=item.quantity_received,
+                    quantity_pending=item.quantity_pending,
+                )
+                for item in order.items
+            ],
+        )
+
     # ========================================================
     # System
     # ========================================================
@@ -459,7 +543,7 @@ def create_app(
             raise HTTPException(
                 status_code=404,
                 detail=(
-                    "SessÃ£o nÃ£o encontrada."
+                    "SessÃƒÂ£o nÃƒÂ£o encontrada."
                 ),
             )
 
@@ -487,6 +571,11 @@ def create_app(
         )
 
         try:
+            procurement_answer = procurement_service.try_answer(request.message)
+            if procurement_answer is not None:
+                answer, purchase_list = procurement_answer
+                return ChatResponse(session_id=session.id, success=True, mode="simple", result=answer, capability="procurement.purchase_list", arguments={"demand_ids": purchase_list.demand_ids})
+
             result = session.kynka.run(
                 request.message
             )
@@ -528,7 +617,7 @@ def create_app(
             raise HTTPException(
                 status_code=404,
                 detail=(
-                    "SessÃ£o nÃ£o encontrada."
+                    "SessÃƒÂ£o nÃƒÂ£o encontrada."
                 ),
             )
 
@@ -577,7 +666,7 @@ def create_app(
             raise HTTPException(
                 status_code=404,
                 detail=(
-                    "SessÃ£o nÃ£o encontrada."
+                    "SessÃƒÂ£o nÃƒÂ£o encontrada."
                 ),
             )
 
@@ -604,7 +693,7 @@ def create_app(
             raise HTTPException(
                 status_code=404,
                 detail=(
-                    "SessÃ£o nÃ£o encontrada."
+                    "SessÃƒÂ£o nÃƒÂ£o encontrada."
                 ),
             )
 
@@ -778,7 +867,7 @@ def create_app(
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    "Arquivo invÃ¡lido. "
+                    "Arquivo invÃƒÂ¡lido. "
                     "Utilize .xlsx ou .xlsm."
                 ),
             )
@@ -1016,7 +1105,7 @@ def create_app(
 
             else:
                 raise ValueError(
-                    "Tipo de movimentaÃ§Ã£o invÃ¡lido."
+                    "Tipo de movimentaÃƒÂ§ÃƒÂ£o invÃƒÂ¡lido."
                 )
 
             return movement_response(
@@ -1103,7 +1192,7 @@ def create_app(
                     raise HTTPException(
                         status_code=400,
                         detail=(
-                            "Data inicial invÃ¡lida. "
+                            "Data inicial invÃƒÂ¡lida. "
                             "Utilize YYYY-MM-DD."
                         ),
                     ) from error
@@ -1444,6 +1533,110 @@ def create_app(
             ) from error
 
     # ========================================================
+    # Procurement / Purchase lists
+    # ========================================================
+    @api.get("/api/v1/demands/{demand_id}/purchase-list",response_model=PurchaseListResponse,tags=["procurement"])
+    def demand_purchase_list(demand_id:int):
+        try: return purchase_list_response(procurement_service.for_demand(demand_id))
+        except DemandNotFoundError as error: raise HTTPException(status_code=404,detail=str(error)) from error
+
+    @api.post("/api/v1/procurement/consolidated",response_model=PurchaseListResponse,tags=["procurement"])
+    def consolidated_purchase_list(request:ConsolidatedPurchaseListRequest):
+        try: return purchase_list_response(procurement_service.consolidated(request.demand_ids))
+        except DemandNotFoundError as error: raise HTTPException(status_code=404,detail=str(error)) from error
+
+    # ========================================================
+    # Purchase Orders / Receiving
+    # ========================================================
+
+    @api.post(
+        "/api/v1/procurement/orders",
+        response_model=PurchaseOrderResponse,
+        status_code=201,
+        tags=["procurement"],
+    )
+    def create_purchase_order(request: PurchaseOrderCreateRequest):
+        try:
+            return purchase_order_response(
+                purchase_order_service.create(
+                    request.demand_ids,
+                    request.notes,
+                )
+            )
+        except DemandNotFoundError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except PurchaseOrderDuplicateError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
+    @api.get(
+        "/api/v1/procurement/orders",
+        response_model=list[PurchaseOrderResponse],
+        tags=["procurement"],
+    )
+    def list_purchase_orders():
+        return [purchase_order_response(order) for order in purchase_order_service.list_orders()]
+
+    @api.get(
+        "/api/v1/procurement/orders/{order_id}",
+        response_model=PurchaseOrderResponse,
+        tags=["procurement"],
+    )
+    def get_purchase_order(order_id: int):
+        try:
+            return purchase_order_response(purchase_order_service.get(order_id))
+        except PurchaseOrderNotFoundError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+
+    @api.post(
+        "/api/v1/procurement/orders/{order_id}/mark-ordered",
+        response_model=PurchaseOrderResponse,
+        tags=["procurement"],
+    )
+    def mark_purchase_order_ordered(order_id: int):
+        try:
+            return purchase_order_response(purchase_order_service.mark_ordered(order_id))
+        except PurchaseOrderNotFoundError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except PurchaseOrderStateError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+
+    @api.post(
+        "/api/v1/procurement/orders/{order_id}/cancel",
+        response_model=PurchaseOrderResponse,
+        tags=["procurement"],
+    )
+    def cancel_purchase_order(order_id: int):
+        try:
+            return purchase_order_response(purchase_order_service.cancel(order_id))
+        except PurchaseOrderNotFoundError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except PurchaseOrderStateError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+
+    @api.post(
+        "/api/v1/procurement/orders/{order_id}/items/{item_id}/receive",
+        response_model=PurchaseOrderResponse,
+        tags=["procurement"],
+    )
+    def receive_purchase_order_item(
+        order_id: int,
+        item_id: int,
+        request: PurchaseOrderReceiveRequest,
+    ):
+        try:
+            return purchase_order_response(
+                purchase_order_service.receive(order_id, item_id, request.quantity)
+            )
+        except PurchaseOrderNotFoundError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except PurchaseOrderStateError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
+    # ========================================================
     # Demand quantity map import
     # ========================================================
 
@@ -1553,7 +1746,7 @@ def create_app(
             raise HTTPException(
                 status_code=500,
                 detail=(
-                    "NÃ£o foi possÃ­vel importar "
+                    "NÃƒÂ£o foi possÃƒÂ­vel importar "
                     "o mapa de quantidades: "
                     f"{error}"
                 ),
@@ -1575,3 +1768,5 @@ def create_app(
 
 
 app = create_app()
+
+
