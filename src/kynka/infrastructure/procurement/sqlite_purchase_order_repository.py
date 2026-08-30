@@ -15,6 +15,10 @@ class PurchaseOrderRecord:
     status: str
     demand_ids: list[int]
     demand_codes: list[str]
+    supplier_id: int | None
+    supplier_code: str | None
+    supplier_name: str | None
+    total_estimated: float
     notes: str
     created_at: str
     ordered_at: str | None
@@ -30,6 +34,8 @@ class PurchaseOrderItemRecord:
     unit: str
     quantity_ordered: float
     quantity_received: float
+    unit_price: float
+    total_price: float
 
     @property
     def quantity_pending(self) -> float:
@@ -47,6 +53,16 @@ class SQLitePurchaseOrderRepository:
         connection.execute("PRAGMA foreign_keys = ON")
         return connection
 
+    @staticmethod
+    def _has_column(connection, table: str, column: str) -> bool:
+        rows = connection.execute(f"PRAGMA table_info({table})").fetchall()
+        return any(row["name"] == column for row in rows)
+
+    @classmethod
+    def _ensure_column(cls, connection, table: str, column: str, definition: str) -> None:
+        if not cls._has_column(connection, table, column):
+            connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
     def _initialize(self) -> None:
         with self._connect() as connection:
             connection.executescript(
@@ -56,6 +72,10 @@ class SQLitePurchaseOrderRepository:
                     status TEXT NOT NULL DEFAULT 'draft',
                     demand_ids TEXT NOT NULL DEFAULT '[]',
                     demand_codes TEXT NOT NULL DEFAULT '[]',
+                    supplier_id INTEGER,
+                    supplier_code TEXT,
+                    supplier_name TEXT,
+                    total_estimated REAL NOT NULL DEFAULT 0,
                     notes TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL,
                     ordered_at TEXT,
@@ -70,35 +90,84 @@ class SQLitePurchaseOrderRepository:
                     unit TEXT NOT NULL,
                     quantity_ordered REAL NOT NULL,
                     quantity_received REAL NOT NULL DEFAULT 0,
+                    unit_price REAL NOT NULL DEFAULT 0,
+                    total_price REAL NOT NULL DEFAULT 0,
                     FOREIGN KEY(order_id) REFERENCES purchase_orders(id)
                         ON DELETE CASCADE
                 );
                 """
             )
 
-    def create_order(self, demand_ids, demand_codes, notes, items) -> int:
+            self._ensure_column(connection, "purchase_orders", "supplier_id", "INTEGER")
+            self._ensure_column(connection, "purchase_orders", "supplier_code", "TEXT")
+            self._ensure_column(connection, "purchase_orders", "supplier_name", "TEXT")
+            self._ensure_column(connection, "purchase_orders", "total_estimated", "REAL NOT NULL DEFAULT 0")
+            self._ensure_column(connection, "purchase_order_items", "unit_price", "REAL NOT NULL DEFAULT 0")
+            self._ensure_column(connection, "purchase_order_items", "total_price", "REAL NOT NULL DEFAULT 0")
+
+    def create_order(
+        self,
+        demand_ids,
+        demand_codes,
+        notes,
+        items,
+        supplier=None,
+        pricing=None,
+    ) -> int:
         now = datetime.now().isoformat(timespec="seconds")
+        pricing = pricing or {}
+        supplier_id = supplier.id if supplier else None
+        supplier_code = supplier.code if supplier else None
+        supplier_name = supplier.name if supplier else None
+        total_estimated = sum(
+            float(pricing.get(item.material_code, {}).get("total_price", 0))
+            for item in items
+        )
+
         with self._connect() as connection:
             cursor = connection.execute(
                 """
                 INSERT INTO purchase_orders(
-                    status, demand_ids, demand_codes, notes, created_at
-                ) VALUES ('draft', ?, ?, ?, ?)
+                    status, demand_ids, demand_codes,
+                    supplier_id, supplier_code, supplier_name, total_estimated,
+                    notes, created_at
+                ) VALUES ('draft', ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (json.dumps(demand_ids), json.dumps(demand_codes), notes.strip(), now),
+                (
+                    json.dumps(demand_ids), json.dumps(demand_codes),
+                    supplier_id, supplier_code, supplier_name, total_estimated,
+                    notes.strip(), now,
+                ),
             )
             order_id = int(cursor.lastrowid)
+
+            rows = []
+            for item in items:
+                price = pricing.get(item.material_code, {})
+                order_quantity = float(price.get("order_quantity", item.quantity_to_buy))
+                unit_price = float(price.get("unit_price", 0))
+                total_price = float(price.get("total_price", order_quantity * unit_price))
+                rows.append(
+                    (
+                        order_id,
+                        item.material_code,
+                        item.material_name,
+                        item.unit,
+                        order_quantity,
+                        unit_price,
+                        total_price,
+                    )
+                )
+
             connection.executemany(
                 """
                 INSERT INTO purchase_order_items(
                     order_id, material_code, material_name, unit,
-                    quantity_ordered, quantity_received
-                ) VALUES (?, ?, ?, ?, ?, 0)
+                    quantity_ordered, quantity_received,
+                    unit_price, total_price
+                ) VALUES (?, ?, ?, ?, ?, 0, ?, ?)
                 """,
-                [
-                    (order_id, i.material_code, i.material_name, i.unit, i.quantity_to_buy)
-                    for i in items
-                ],
+                rows,
             )
             return order_id
 
@@ -159,18 +228,30 @@ class SQLitePurchaseOrderRepository:
     @staticmethod
     def _to_order(row) -> PurchaseOrderRecord:
         return PurchaseOrderRecord(
-            id=row["id"], status=row["status"],
+            id=row["id"],
+            status=row["status"],
             demand_ids=json.loads(row["demand_ids"]),
             demand_codes=json.loads(row["demand_codes"]),
-            notes=row["notes"], created_at=row["created_at"],
-            ordered_at=row["ordered_at"], completed_at=row["completed_at"],
+            supplier_id=row["supplier_id"],
+            supplier_code=row["supplier_code"],
+            supplier_name=row["supplier_name"],
+            total_estimated=float(row["total_estimated"] or 0),
+            notes=row["notes"],
+            created_at=row["created_at"],
+            ordered_at=row["ordered_at"],
+            completed_at=row["completed_at"],
         )
 
     @staticmethod
     def _to_item(row) -> PurchaseOrderItemRecord:
         return PurchaseOrderItemRecord(
-            id=row["id"], order_id=row["order_id"],
-            material_code=row["material_code"], material_name=row["material_name"],
-            unit=row["unit"], quantity_ordered=row["quantity_ordered"],
+            id=row["id"],
+            order_id=row["order_id"],
+            material_code=row["material_code"],
+            material_name=row["material_name"],
+            unit=row["unit"],
+            quantity_ordered=row["quantity_ordered"],
             quantity_received=row["quantity_received"],
+            unit_price=float(row["unit_price"] or 0),
+            total_price=float(row["total_price"] or 0),
         )

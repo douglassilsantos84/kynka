@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import shutil
 import tempfile
@@ -45,6 +45,13 @@ from kynka.application.inventory import (
     MaterialNotFoundError,
 )
 
+from kynka.application.suppliers import (
+    SupplierAlreadyExistsError,
+    SupplierCatalogError,
+    SupplierNotFoundError,
+    SupplierService,
+)
+
 from kynka.infrastructure.importers import (
     InventoryImporter,
 )
@@ -59,6 +66,10 @@ from kynka.infrastructure.inventory import (
 
 from kynka.infrastructure.procurement import (
     SQLitePurchaseOrderRepository,
+)
+
+from kynka.infrastructure.suppliers import (
+    SQLiteSupplierRepository,
 )
 
 from .config import APISettings
@@ -95,6 +106,17 @@ from .schemas import (
     PurchaseOrderItemResponse,
     PurchaseOrderReceiveRequest,
     PurchaseOrderResponse,
+    MaterialQuoteResponse,
+    PurchaseQuoteRequest,
+    PurchaseQuoteResponse,
+    PurchaseSupplierOptionResponse,
+    SupplierCreateRequest,
+    SupplierMaterialResponse,
+    SupplierMaterialUpsertRequest,
+    SupplierPriceHistoryResponse,
+    SupplierResponse,
+    SupplierStatusRequest,
+    SupplierUpdateRequest,
     StatusResponse,
     StockReservationResponse,
     VariablesResponse,
@@ -192,6 +214,17 @@ def create_app(
         inventory_repository,
     )
 
+    supplier_repository = SQLiteSupplierRepository(
+        DATABASE_PATH
+    )
+
+    supplier_service = SupplierService(
+        supplier_repository,
+        inventory_service,
+        procurement_service,
+        demand_repository,
+    )
+
     purchase_order_repository = SQLitePurchaseOrderRepository(
         DATABASE_PATH
     )
@@ -200,6 +233,7 @@ def create_app(
         purchase_order_repository,
         procurement_service,
         inventory_service,
+        supplier_service,
     )
 
     # ========================================================
@@ -247,6 +281,9 @@ def create_app(
         procurement_service
     )
 
+    api.state.supplier_service = (
+        supplier_service
+    )
 
     api.state.purchase_order_service = (
         purchase_order_service
@@ -466,6 +503,10 @@ def create_app(
             status=order.status,
             demand_ids=order.demand_ids,
             demand_codes=order.demand_codes,
+            supplier_id=order.supplier_id,
+            supplier_code=order.supplier_code,
+            supplier_name=order.supplier_name,
+            total_estimated=order.total_estimated,
             notes=order.notes,
             created_at=order.created_at,
             ordered_at=order.ordered_at,
@@ -479,6 +520,8 @@ def create_app(
                     quantity_ordered=item.quantity_ordered,
                     quantity_received=item.quantity_received,
                     quantity_pending=item.quantity_pending,
+                    unit_price=item.unit_price,
+                    total_price=item.total_price,
                 )
                 for item in order.items
             ],
@@ -571,6 +614,17 @@ def create_app(
         )
 
         try:
+            supplier_answer = supplier_service.try_answer(request.message)
+            if supplier_answer is not None:
+                return ChatResponse(
+                    session_id=session.id,
+                    success=True,
+                    mode="simple",
+                    result=supplier_answer,
+                    capability="procurement.supplier_intelligence",
+                    arguments={},
+                )
+
             procurement_answer = procurement_service.try_answer(request.message)
             if procurement_answer is not None:
                 answer, purchase_list = procurement_answer
@@ -1533,6 +1587,186 @@ def create_app(
             ) from error
 
     # ========================================================
+    # Suppliers / Pricing Intelligence
+    # ========================================================
+
+    def supplier_response(supplier) -> SupplierResponse:
+        return SupplierResponse(
+            id=supplier.id,
+            code=supplier.code,
+            name=supplier.name,
+            nif=supplier.nif,
+            email=supplier.email,
+            phone=supplier.phone,
+            notes=supplier.notes,
+            active=supplier.active,
+            created_at=supplier.created_at,
+            updated_at=supplier.updated_at,
+        )
+
+    def supplier_material_response(item) -> SupplierMaterialResponse:
+        return SupplierMaterialResponse(
+            id=item.id,
+            supplier_id=item.supplier_id,
+            material_code=item.material_code,
+            material_name=item.material_name,
+            unit=item.unit,
+            unit_price=item.unit_price,
+            lead_time_days=item.lead_time_days,
+            minimum_order_quantity=item.minimum_order_quantity,
+            updated_at=item.updated_at,
+        )
+
+    def material_quote_response(item) -> MaterialQuoteResponse:
+        return MaterialQuoteResponse(
+            supplier_id=item.supplier_id,
+            supplier_code=item.supplier_code,
+            supplier_name=item.supplier_name,
+            material_code=item.material_code,
+            material_name=item.material_name,
+            unit=item.unit,
+            requested_quantity=item.requested_quantity,
+            order_quantity=item.order_quantity,
+            unit_price=item.unit_price,
+            total_price=item.total_price,
+            lead_time_days=item.lead_time_days,
+            minimum_order_quantity=item.minimum_order_quantity,
+        )
+
+    def purchase_quote_response(result) -> PurchaseQuoteResponse:
+        return PurchaseQuoteResponse(
+            demand_ids=result.demand_ids,
+            demand_codes=result.demand_codes,
+            total_materials=result.total_materials,
+            options=[
+                PurchaseSupplierOptionResponse(
+                    supplier_id=option.supplier_id,
+                    supplier_code=option.supplier_code,
+                    supplier_name=option.supplier_name,
+                    covered_materials=option.covered_materials,
+                    total_materials=option.total_materials,
+                    full_coverage=option.full_coverage,
+                    total_estimated=option.total_estimated,
+                    max_lead_time_days=option.max_lead_time_days,
+                    items=[material_quote_response(item) for item in option.items],
+                )
+                for option in result.options
+            ],
+            best_supplier_id=result.best_supplier_id,
+            best_supplier_name=result.best_supplier_name,
+            best_total_estimated=result.best_total_estimated,
+            best_mix_total=result.best_mix_total,
+            best_mix=[material_quote_response(item) for item in result.best_mix],
+            analysis=result.analysis,
+        )
+
+    @api.post("/api/v1/suppliers", response_model=SupplierResponse, status_code=201, tags=["suppliers"])
+    def supplier_create(request: SupplierCreateRequest):
+        try:
+            return supplier_response(supplier_service.create_supplier(
+                request.code, request.name, request.nif, request.email, request.phone, request.notes
+            ))
+        except SupplierAlreadyExistsError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
+    @api.get("/api/v1/suppliers", response_model=list[SupplierResponse], tags=["suppliers"])
+    def supplier_list(active_only: bool = False):
+        return [supplier_response(item) for item in supplier_service.list_suppliers(active_only)]
+
+    @api.get("/api/v1/suppliers/{supplier_id}", response_model=SupplierResponse, tags=["suppliers"])
+    def supplier_get(supplier_id: int):
+        try:
+            return supplier_response(supplier_service.get_supplier(supplier_id))
+        except SupplierNotFoundError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+
+    @api.put("/api/v1/suppliers/{supplier_id}", response_model=SupplierResponse, tags=["suppliers"])
+    def supplier_update(supplier_id: int, request: SupplierUpdateRequest):
+        try:
+            return supplier_response(supplier_service.update_supplier(
+                supplier_id, request.name, request.nif, request.email, request.phone, request.notes
+            ))
+        except SupplierNotFoundError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
+    @api.put("/api/v1/suppliers/{supplier_id}/status", response_model=SupplierResponse, tags=["suppliers"])
+    def supplier_status(supplier_id: int, request: SupplierStatusRequest):
+        try:
+            return supplier_response(supplier_service.set_active(supplier_id, request.active))
+        except SupplierNotFoundError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+
+    @api.get("/api/v1/suppliers/{supplier_id}/materials", response_model=list[SupplierMaterialResponse], tags=["suppliers"])
+    def supplier_materials(supplier_id: int):
+        try:
+            return [supplier_material_response(item) for item in supplier_service.list_supplier_materials(supplier_id)]
+        except SupplierNotFoundError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+
+    @api.post("/api/v1/suppliers/{supplier_id}/materials", response_model=SupplierMaterialResponse, tags=["suppliers"])
+    def supplier_material_upsert(supplier_id: int, request: SupplierMaterialUpsertRequest):
+        try:
+            return supplier_material_response(supplier_service.upsert_material(
+                supplier_id,
+                request.material_code,
+                request.unit_price,
+                request.lead_time_days,
+                request.minimum_order_quantity,
+            ))
+        except (SupplierNotFoundError, MaterialNotFoundError) as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except SupplierCatalogError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
+    @api.delete("/api/v1/suppliers/{supplier_id}/materials/{material_code}", tags=["suppliers"])
+    def supplier_material_delete(supplier_id: int, material_code: str):
+        try:
+            supplier_service.remove_material(supplier_id, material_code)
+            return {"deleted": True, "material_code": material_code}
+        except (SupplierNotFoundError, MaterialNotFoundError) as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except SupplierCatalogError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+
+    @api.get("/api/v1/suppliers/{supplier_id}/materials/{material_code}/history", response_model=list[SupplierPriceHistoryResponse], tags=["suppliers"])
+    def supplier_material_history(supplier_id: int, material_code: str):
+        try:
+            return [
+                SupplierPriceHistoryResponse(
+                    id=item.id,
+                    supplier_id=item.supplier_id,
+                    material_code=item.material_code,
+                    unit_price=item.unit_price,
+                    recorded_at=item.recorded_at,
+                )
+                for item in supplier_service.price_history(supplier_id, material_code)
+            ]
+        except (SupplierNotFoundError, MaterialNotFoundError) as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+
+    @api.get("/api/v1/supplier-quotes/materials/{material_code}", response_model=list[MaterialQuoteResponse], tags=["suppliers"])
+    def supplier_material_quotes(material_code: str, quantity: float = Query(default=1, gt=0)):
+        try:
+            return [material_quote_response(item) for item in supplier_service.compare_material(material_code, quantity)]
+        except MaterialNotFoundError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from error
+
+    @api.post("/api/v1/procurement/quotes", response_model=PurchaseQuoteResponse, tags=["procurement"])
+    def procurement_quotes(request: PurchaseQuoteRequest):
+        try:
+            return purchase_quote_response(supplier_service.quote_purchase(request.demand_ids))
+        except DemandNotFoundError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+
+    # ========================================================
     # Procurement / Purchase lists
     # ========================================================
     @api.get("/api/v1/demands/{demand_id}/purchase-list",response_model=PurchaseListResponse,tags=["procurement"])
@@ -1561,12 +1795,17 @@ def create_app(
                 purchase_order_service.create(
                     request.demand_ids,
                     request.notes,
+                    request.supplier_id,
                 )
             )
         except DemandNotFoundError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
         except PurchaseOrderDuplicateError as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
+        except SupplierCatalogError as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+        except SupplierNotFoundError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
 

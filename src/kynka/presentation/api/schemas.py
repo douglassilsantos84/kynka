@@ -409,6 +409,117 @@ class ConsolidatedPurchaseListRequest(BaseModel):
     demand_ids:list[int]|None=None
 
 
+
+# ============================================================
+# Suppliers / Pricing Intelligence
+# ============================================================
+
+
+class SupplierCreateRequest(BaseModel):
+    code: str = Field(min_length=1, max_length=100)
+    name: str = Field(min_length=1, max_length=300)
+    nif: str = Field(default="", max_length=50)
+    email: str = Field(default="", max_length=300)
+    phone: str = Field(default="", max_length=100)
+    notes: str = Field(default="", max_length=2000)
+
+
+class SupplierUpdateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=300)
+    nif: str = Field(default="", max_length=50)
+    email: str = Field(default="", max_length=300)
+    phone: str = Field(default="", max_length=100)
+    notes: str = Field(default="", max_length=2000)
+
+
+class SupplierStatusRequest(BaseModel):
+    active: bool
+
+
+class SupplierResponse(BaseModel):
+    id: int
+    code: str
+    name: str
+    nif: str
+    email: str
+    phone: str
+    notes: str
+    active: bool
+    created_at: str
+    updated_at: str
+
+
+class SupplierMaterialUpsertRequest(BaseModel):
+    material_code: str = Field(min_length=1, max_length=100)
+    unit_price: float = Field(ge=0)
+    lead_time_days: int = Field(default=0, ge=0)
+    minimum_order_quantity: float = Field(default=0, ge=0)
+
+
+class SupplierMaterialResponse(BaseModel):
+    id: int
+    supplier_id: int
+    material_code: str
+    material_name: str
+    unit: str
+    unit_price: float
+    lead_time_days: int
+    minimum_order_quantity: float
+    updated_at: str
+
+
+class SupplierPriceHistoryResponse(BaseModel):
+    id: int
+    supplier_id: int
+    material_code: str
+    unit_price: float
+    recorded_at: str
+
+
+class MaterialQuoteResponse(BaseModel):
+    supplier_id: int
+    supplier_code: str
+    supplier_name: str
+    material_code: str
+    material_name: str
+    unit: str
+    requested_quantity: float
+    order_quantity: float
+    unit_price: float
+    total_price: float
+    lead_time_days: int
+    minimum_order_quantity: float
+
+
+class PurchaseSupplierOptionResponse(BaseModel):
+    supplier_id: int
+    supplier_code: str
+    supplier_name: str
+    covered_materials: int
+    total_materials: int
+    full_coverage: bool
+    total_estimated: float
+    max_lead_time_days: int
+    items: list[MaterialQuoteResponse] = Field(default_factory=list)
+
+
+class PurchaseQuoteRequest(BaseModel):
+    demand_ids: list[int] | None = None
+
+
+class PurchaseQuoteResponse(BaseModel):
+    demand_ids: list[int] = Field(default_factory=list)
+    demand_codes: list[str] = Field(default_factory=list)
+    total_materials: int
+    options: list[PurchaseSupplierOptionResponse] = Field(default_factory=list)
+    best_supplier_id: int | None = None
+    best_supplier_name: str | None = None
+    best_total_estimated: float | None = None
+    best_mix_total: float | None = None
+    best_mix: list[MaterialQuoteResponse] = Field(default_factory=list)
+    analysis: str
+
+
 # ============================================================
 # Purchase Orders / Receiving
 # ============================================================
@@ -417,6 +528,7 @@ class ConsolidatedPurchaseListRequest(BaseModel):
 class PurchaseOrderCreateRequest(BaseModel):
     demand_ids: list[int] | None = None
     notes: str = Field(default="", max_length=2000)
+    supplier_id: int | None = None
 
 
 class PurchaseOrderReceiveRequest(BaseModel):
@@ -431,6 +543,8 @@ class PurchaseOrderItemResponse(BaseModel):
     quantity_ordered: float
     quantity_received: float
     quantity_pending: float
+    unit_price: float = 0
+    total_price: float = 0
 
 
 class PurchaseOrderResponse(BaseModel):
@@ -438,6 +552,10 @@ class PurchaseOrderResponse(BaseModel):
     status: str
     demand_ids: list[int] = Field(default_factory=list)
     demand_codes: list[str] = Field(default_factory=list)
+    supplier_id: int | None = None
+    supplier_code: str | None = None
+    supplier_name: str | None = None
+    total_estimated: float = 0
     notes: str
     created_at: str
     ordered_at: str | None = None

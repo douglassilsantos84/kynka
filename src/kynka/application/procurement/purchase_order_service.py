@@ -1,10 +1,11 @@
-﻿"""Caso de uso de pedidos de compra e recebimento."""
+"""Casos de uso de pedidos de compra, preços e recebimento."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
 from kynka.application.inventory import InventoryService
+from kynka.application.suppliers import SupplierCatalogError, SupplierService
 from kynka.infrastructure.procurement import SQLitePurchaseOrderRepository
 
 from .procurement_service import ProcurementService
@@ -31,6 +32,8 @@ class PurchaseOrderItem:
     quantity_ordered: float
     quantity_received: float
     quantity_pending: float
+    unit_price: float
+    total_price: float
 
 
 @dataclass(slots=True)
@@ -39,6 +42,10 @@ class PurchaseOrder:
     status: str
     demand_ids: list[int]
     demand_codes: list[str]
+    supplier_id: int | None
+    supplier_code: str | None
+    supplier_name: str | None
+    total_estimated: float
     notes: str
     created_at: str
     ordered_at: str | None
@@ -58,35 +65,49 @@ class PurchaseOrderService:
         repository: SQLitePurchaseOrderRepository,
         procurement_service: ProcurementService,
         inventory_service: InventoryService,
+        supplier_service: SupplierService | None = None,
     ) -> None:
         self._repository = repository
         self._procurement_service = procurement_service
         self._inventory_service = inventory_service
+        self._supplier_service = supplier_service
 
     def create(
         self,
         demand_ids: list[int] | None = None,
         notes: str = "",
+        supplier_id: int | None = None,
     ) -> PurchaseOrder:
-        purchase_list = self._procurement_service.consolidated(
-            demand_ids
-        )
+        purchase_list = self._procurement_service.consolidated(demand_ids)
 
         if not purchase_list.items:
-            raise ValueError(
-                "Não há materiais para gerar um pedido de compra."
-            )
+            raise ValueError("Não há materiais para gerar um pedido de compra.")
 
         self._validate_no_duplicate_pending_items(
             purchase_list.demand_ids,
             purchase_list.items,
         )
 
+        supplier = None
+        pricing = None
+
+        if supplier_id is not None:
+            if self._supplier_service is None:
+                raise SupplierCatalogError(
+                    "O serviço de fornecedores não está disponível."
+                )
+            supplier, pricing = self._supplier_service.pricing_for_supplier(
+                int(supplier_id),
+                purchase_list.items,
+            )
+
         order_id = self._repository.create_order(
             purchase_list.demand_ids,
             purchase_list.demand_codes,
             notes,
             purchase_list.items,
+            supplier=supplier,
+            pricing=pricing,
         )
 
         return self.get(order_id)
@@ -96,11 +117,7 @@ class PurchaseOrderService:
         demand_ids: list[int],
         purchase_items,
     ) -> None:
-        requested_demand_ids = {
-            int(demand_id)
-            for demand_id in demand_ids
-        }
-
+        requested_demand_ids = {int(demand_id) for demand_id in demand_ids}
         materials_to_create = {
             item.material_code
             for item in purchase_items
@@ -108,29 +125,19 @@ class PurchaseOrderService:
         }
 
         conflicts = []
-
         for record in self._repository.list_orders():
             if record.status not in self.ACTIVE_STATUSES:
                 continue
 
-            existing_demand_ids = {
-                int(demand_id)
-                for demand_id in record.demand_ids
-            }
-
-            if not (
-                requested_demand_ids
-                & existing_demand_ids
-            ):
+            existing_demand_ids = {int(demand_id) for demand_id in record.demand_ids}
+            if not (requested_demand_ids & existing_demand_ids):
                 continue
 
             for item in self._repository.get_items(record.id):
                 if item.quantity_pending <= 0:
                     continue
-
                 if item.material_code not in materials_to_create:
                     continue
-
                 conflicts.append(
                     (
                         record.id,
@@ -145,42 +152,23 @@ class PurchaseOrderService:
             return
 
         lines = [
-            "Já existe pedido de compra ativo para "
-            "material(is) desta necessidade:"
+            "Já existe pedido de compra ativo para material(is) desta necessidade:"
         ]
-
-        for (
-            order_id,
-            material_code,
-            material_name,
-            quantity_pending,
-            unit,
-        ) in conflicts:
+        for order_id, material_code, material_name, quantity_pending, unit in conflicts:
             lines.append(
-                f"Pedido #{order_id} — "
-                f"{material_code} — "
-                f"{material_name}: "
+                f"Pedido #{order_id} — {material_code} — {material_name}: "
                 f"{quantity_pending:g} {unit} pendente(s)."
             )
-
         lines.append(
-            "Receba ou cancele o pedido existente antes "
-            "de gerar outro pedido para o mesmo material."
+            "Receba ou cancele o pedido existente antes de gerar outro pedido para o mesmo material."
         )
-
-        raise PurchaseOrderDuplicateError(
-            "\n".join(lines)
-        )
+        raise PurchaseOrderDuplicateError("\n".join(lines))
 
     def list_orders(self) -> list[PurchaseOrder]:
-        return [
-            self.get(record.id)
-            for record in self._repository.list_orders()
-        ]
+        return [self.get(record.id) for record in self._repository.list_orders()]
 
     def get(self, order_id: int) -> PurchaseOrder:
         record = self._repository.get_order(order_id)
-
         if record is None:
             raise PurchaseOrderNotFoundError(
                 f"Pedido de compra não encontrado: {order_id}."
@@ -195,6 +183,8 @@ class PurchaseOrderService:
                 quantity_ordered=item.quantity_ordered,
                 quantity_received=item.quantity_received,
                 quantity_pending=item.quantity_pending,
+                unit_price=item.unit_price,
+                total_price=item.total_price,
             )
             for item in self._repository.get_items(order_id)
         ]
@@ -204,6 +194,10 @@ class PurchaseOrderService:
             status=record.status,
             demand_ids=record.demand_ids,
             demand_codes=record.demand_codes,
+            supplier_id=record.supplier_id,
+            supplier_code=record.supplier_code,
+            supplier_name=record.supplier_name,
+            total_estimated=record.total_estimated,
             notes=record.notes,
             created_at=record.created_at,
             ordered_at=record.ordered_at,
@@ -211,155 +205,73 @@ class PurchaseOrderService:
             items=items,
         )
 
-    def mark_ordered(
-        self,
-        order_id: int,
-    ) -> PurchaseOrder:
+    def mark_ordered(self, order_id: int) -> PurchaseOrder:
         order = self.get(order_id)
-
         if order.status != "draft":
             raise PurchaseOrderStateError(
-                "Somente pedidos em rascunho podem ser "
-                "marcados como enviados ao fornecedor."
+                "Somente pedidos em rascunho podem ser marcados como enviados ao fornecedor."
             )
-
-        self._repository.set_status(
-            order_id,
-            "ordered",
-        )
-
+        self._repository.set_status(order_id, "ordered")
         return self.get(order_id)
 
-    def cancel(
-        self,
-        order_id: int,
-    ) -> PurchaseOrder:
+    def cancel(self, order_id: int) -> PurchaseOrder:
         order = self.get(order_id)
-
         if order.status == "received":
             raise PurchaseOrderStateError(
-                "Um pedido totalmente recebido não pode "
-                "ser cancelado."
+                "Um pedido totalmente recebido não pode ser cancelado."
             )
-
-        self._repository.set_status(
-            order_id,
-            "cancelled",
-        )
-
+        self._repository.set_status(order_id, "cancelled")
         return self.get(order_id)
 
-    def receive(
-        self,
-        order_id: int,
-        item_id: int,
-        quantity: float,
-    ) -> PurchaseOrder:
+    def receive(self, order_id: int, item_id: int, quantity: float) -> PurchaseOrder:
         order = self.get(order_id)
-
-        if order.status not in {
-            "ordered",
-            "partially_received",
-        }:
+        if order.status not in {"ordered", "partially_received"}:
             raise PurchaseOrderStateError(
-                "O pedido precisa estar enviado ao "
-                "fornecedor antes do recebimento."
+                "O pedido precisa estar enviado ao fornecedor antes do recebimento."
             )
 
-        item_record = self._repository.get_item(
-            item_id
-        )
-
-        if (
-            item_record is None
-            or item_record.order_id != order_id
-        ):
-            raise PurchaseOrderNotFoundError(
-                "Item do pedido não encontrado."
-            )
+        item_record = self._repository.get_item(item_id)
+        if item_record is None or item_record.order_id != order_id:
+            raise PurchaseOrderNotFoundError("Item do pedido não encontrado.")
 
         quantity = float(quantity)
-
         if quantity <= 0:
-            raise ValueError(
-                "A quantidade recebida deve ser "
-                "maior que zero."
-            )
-
+            raise ValueError("A quantidade recebida deve ser maior que zero.")
         if quantity > item_record.quantity_pending:
             raise ValueError(
-                "Quantidade recebida superior ao "
-                "pendente. "
-                f"Pendente: "
-                f"{item_record.quantity_pending:g} "
-                f"{item_record.unit}."
+                "Quantidade recebida superior ao pendente. "
+                f"Pendente: {item_record.quantity_pending:g} {item_record.unit}."
             )
 
-        material = self._inventory_service.get_material(
-            item_record.material_code
-        )
-
+        material = self._inventory_service.get_material(item_record.material_code)
         previous_quantity = material.quantity
 
         try:
             self._inventory_service.add_entry(
                 item_record.material_code,
                 quantity,
-                (
-                    "Recebimento pedido de compra "
-                    f"#{order_id}"
-                ),
+                f"Recebimento pedido de compra #{order_id}",
             )
-
-            self._repository.add_received(
-                item_id,
-                quantity,
-            )
-
+            self._repository.add_received(item_id, quantity)
         except Exception:
-            # Compensação enquanto não houver uma
-            # Unit of Work compartilhada.
             try:
                 self._inventory_service.adjust_stock(
                     item_record.material_code,
                     previous_quantity,
-                    (
-                        "Compensação de falha no "
-                        "recebimento do pedido "
-                        f"#{order_id}"
-                    ),
+                    f"Compensação de falha no recebimento do pedido #{order_id}",
                 )
             except Exception:
                 pass
-
             raise
 
         refreshed = self.get(order_id)
-
-        pending = sum(
-            item.quantity_pending
-            for item in refreshed.items
-        )
-
-        new_status = (
-            "received"
-            if pending <= 0
-            else "partially_received"
-        )
-
-        self._repository.set_status(
-            order_id,
-            new_status,
-        )
-
+        pending = sum(item.quantity_pending for item in refreshed.items)
+        new_status = "received" if pending <= 0 else "partially_received"
+        self._repository.set_status(order_id, new_status)
         return self.get(order_id)
 
-    def try_answer(
-        self,
-        text: str,
-    ) -> str | None:
+    def try_answer(self, text: str) -> str | None:
         normalized = text.strip().lower()
-
         terms = (
             "pedidos de compra",
             "pedido de compra",
@@ -369,48 +281,24 @@ class PurchaseOrderService:
             "pedidos pendentes",
             "recebimentos pendentes",
         )
-
-        if not any(
-            term in normalized
-            for term in terms
-        ):
+        if not any(term in normalized for term in terms):
             return None
 
         orders = [
             order
             for order in self.list_orders()
-            if order.status
-            not in {"received", "cancelled"}
+            if order.status not in {"received", "cancelled"}
         ]
-
         if not orders:
-            return (
-                "Não há pedidos de compra pendentes."
-            )
+            return "Não há pedidos de compra pendentes."
 
-        lines = [
-            f"Há {len(orders)} pedido(s) de "
-            "compra pendente(s)."
-        ]
-
+        lines = [f"Há {len(orders)} pedido(s) de compra pendente(s)."]
         for order in orders[:8]:
-            pending_items = sum(
-                1
-                for item in order.items
-                if item.quantity_pending > 0
-            )
-
-            scope = (
-                ", ".join(order.demand_codes)
-                or "consolidado"
-            )
-
+            pending_items = sum(1 for item in order.items if item.quantity_pending > 0)
+            scope = ", ".join(order.demand_codes) or "consolidado"
+            supplier = order.supplier_name or "fornecedor não definido"
             lines.append(
-                f"Pedido #{order.id} — "
-                f"{scope} — "
-                f"status {order.status} — "
-                f"{pending_items} item(ns) "
-                "pendente(s)."
+                f"Pedido #{order.id} — {scope} — {supplier} — "
+                f"status {order.status} — {pending_items} item(ns) pendente(s)."
             )
-
         return "\n".join(lines)
