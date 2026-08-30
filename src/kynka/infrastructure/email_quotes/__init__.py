@@ -1,0 +1,2 @@
+from .sqlite_email_quote_repository import SQLiteEmailQuoteRepository
+__all__=['SQLiteEmailQuoteRepository']
