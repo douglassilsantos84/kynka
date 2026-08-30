@@ -72,6 +72,8 @@ from kynka.infrastructure.suppliers import (
     SQLiteSupplierRepository,
 )
 
+from .quote_import_routes import build_quote_import_router
+
 from .config import APISettings
 
 from .schemas import (
@@ -296,6 +298,8 @@ def create_app(
     # ========================================================
     # CORS
     # ========================================================
+
+    api.include_router(build_quote_import_router(DATABASE_PATH))
 
     api.add_middleware(
         CORSMiddleware,

@@ -1,0 +1,2 @@
+from .sqlite_quote_import_repository import SQLiteQuoteImportRepository
+__all__=['SQLiteQuoteImportRepository']
