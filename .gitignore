@@ -56,3 +56,13 @@ etapa*_backend_atual.txt
 # Operating system
 Thumbs.db
 .DS_Store
+
+# Etapa 22 - local document storage
+data/documents/
+backup_etapa22_*/
+
+# Local backup and diagnostic artifacts
+*.backup_*
+backup_*/
+diagnostico_*.txt
+*_atual.txt

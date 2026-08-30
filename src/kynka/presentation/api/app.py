@@ -78,6 +78,7 @@ from kynka.infrastructure.suppliers import (
 
 from .quote_import_routes import build_quote_import_router
 from .email_quote_routes import build_email_quote_router
+from .document_routes import build_document_router
 
 from .config import APISettings
 
@@ -306,6 +307,7 @@ def create_app(
 
     api.include_router(build_quote_import_router(DATABASE_PATH))
     api.include_router(build_email_quote_router(DATABASE_PATH))
+    api.include_router(build_document_router(DATABASE_PATH, DATA_DIRECTORY / "documents"))
 
     api.add_middleware(
         CORSMiddleware,
