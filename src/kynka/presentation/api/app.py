@@ -139,6 +139,8 @@ from .session_manager import (
     SessionManager,
 )
 
+from .material_request_routes import create_material_request_router
+
 
 # ============================================================
 # Paths
@@ -2014,6 +2016,14 @@ def create_app(
                 temporary_path.unlink(
                     missing_ok=True
                 )
+
+    # ========================================================
+    # Material Requests - Etapa 23
+    # ========================================================
+
+    api.include_router(
+        create_material_request_router(DATABASE_PATH)
+    )
 
     return api
 
