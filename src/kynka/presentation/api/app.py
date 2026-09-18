@@ -140,6 +140,7 @@ from .session_manager import (
 )
 
 from .material_request_routes import create_material_request_router
+from kynka.security import SecurityMiddleware, SecurityService, SecurityStore, build_security_router
 
 
 # ============================================================
@@ -302,6 +303,14 @@ def create_app(
     api.state.quantity_map_importer = (
         quantity_map_importer
     )
+
+    # Etapas 24-26 - Security / Organization / Events
+    security_store = SecurityStore(DATABASE_PATH)
+    security_service = SecurityService(security_store)
+    api.state.security_store = security_store
+    api.state.security_service = security_service
+    api.include_router(build_security_router(security_service))
+    api.add_middleware(SecurityMiddleware, security_service=security_service)
 
     # ========================================================
     # CORS

@@ -4,12 +4,14 @@ from __future__ import annotations
 class MaterialRequestService:
     PRIORITIES = {"low", "normal", "high", "urgent"}
 
+    # Generic transition only approves or cancels.
+    # Separation and delivery must use their dedicated methods.
     TRANSITIONS = {
         "requested": {"approved", "cancelled"},
-        "approved": {"separating", "cancelled"},
-        "separating": {"ready", "shortage", "cancelled"},
-        "shortage": {"separating", "ready", "cancelled"},
-        "ready": {"delivered", "cancelled"},
+        "approved": {"cancelled"},
+        "separating": {"cancelled"},
+        "shortage": {"cancelled"},
+        "ready": {"cancelled"},
         "delivered": set(),
         "cancelled": set(),
     }
