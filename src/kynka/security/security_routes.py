@@ -40,6 +40,7 @@ def build_security_router(service):
         if me["role"]!="admin":raise HTTPException(403,"Permissao insuficiente.")
         if p.role is not None and p.role not in {"admin","stock_manager","buyer","worker"}:raise HTTPException(400,"Perfil invalido.")
         if user_id==me["id"] and p.active is False:raise HTTPException(400,"Nao desative a propria conta administrativa.")
+        if user_id==me["id"] and p.role is not None and p.role!="admin":raise HTTPException(400,"Nao altere o proprio perfil administrativo.")
         service.store.set_user(user_id,me["organization_id"],p.active,p.role);return service.identity(user_id,me["organization_id"])
     @r.get("/events")
     def events(limit:int=100,authorization:str|None=Header(default=None)):

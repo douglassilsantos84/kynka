@@ -18,7 +18,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
     @staticmethod
     def allowed(role,method,path):
         if role=="admin":return True
-        if path.startswith("/api/v1/auth/") or path.startswith("/api/v1/notifications"):return True
+        if path.startswith("/api/v1/auth/") or path.startswith("/api/v1/notifications") or path.startswith("/api/v1/agentic"):return True
         if role=="stock_manager":
             if path.startswith("/api/v1/security") or path.startswith("/api/v1/events"):return False
             if any(path.startswith(x) for x in ["/api/v1/suppliers","/api/v1/procurement","/api/v1/quote-imports","/api/v1/email-quotes"]):return method=="GET"

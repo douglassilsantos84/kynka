@@ -56,10 +56,10 @@ CREATE INDEX IF NOT EXISTS idx_events_org ON platform_events(organization_id,id 
         with self.connect() as c:c.execute("UPDATE users SET last_login_at=? WHERE id=?",(self.now(),user))
     def set_user(self,user,org,active=None,role=None):
         with self.connect() as c:
+            membership=c.execute("SELECT 1 FROM organization_memberships WHERE user_id=? AND organization_id=?",(user,org)).fetchone()
+            if not membership:raise ValueError("Usuario nao pertence a esta organizacao.")
             if active is not None:c.execute("UPDATE users SET active=? WHERE id=?",(1 if active else 0,user))
-            if role is not None:
-                cur=c.execute("UPDATE organization_memberships SET role=? WHERE user_id=? AND organization_id=?",(role,user,org))
-                if cur.rowcount==0:raise ValueError("Usuario nao pertence a esta organizacao.")
+            if role is not None:c.execute("UPDATE organization_memberships SET role=? WHERE user_id=? AND organization_id=?",(role,user,org))
     def event(self,org,actor,event_type,entity_type,entity_id,payload):
         with self.connect() as c:c.execute("INSERT INTO platform_events(organization_id,actor_user_id,event_type,entity_type,entity_id,payload,created_at) VALUES(?,?,?,?,?,?,?)",(org,actor,event_type,entity_type,entity_id,payload,self.now()))
     def events(self,org,limit=100):

@@ -277,7 +277,10 @@ class QuoteImportService:
         sid = int(quote["supplier_id"])
         for item in quote["items"]:
             code = item["matched_material_code"]
-            self.suppliers.upsert_material(sid, code, float(item["unit_price"]))
+            current = self.suppliers.get_supplier_material(sid, code)
+            lead_time_days = current.lead_time_days if current else 0
+            minimum_order_quantity = current.minimum_order_quantity if current else 0.0
+            self.suppliers.upsert_material(sid, code, float(item["unit_price"]), lead_time_days, minimum_order_quantity)
             self.repo.save_alias(sid, item["supplier_reference"], code, item["description"])
         self.repo.approve(iid)
         return self.get(iid)

@@ -141,6 +141,7 @@ from .session_manager import (
 
 from .material_request_routes import create_material_request_router
 from kynka.security import SecurityMiddleware, SecurityService, SecurityStore, build_security_router
+from kynka.agentic import build_agentic_router
 
 
 # ============================================================
@@ -319,6 +320,7 @@ def create_app(
     api.include_router(build_quote_import_router(DATABASE_PATH))
     api.include_router(build_email_quote_router(DATABASE_PATH))
     api.include_router(build_document_router(DATABASE_PATH, DATA_DIRECTORY / "documents"))
+    api.include_router(build_agentic_router(DATABASE_PATH, DATA_DIRECTORY / "documents", security_service, inventory_service, supplier_service))
 
     api.add_middleware(
         CORSMiddleware,
