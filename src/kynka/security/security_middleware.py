@@ -1,6 +1,6 @@
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
-PUBLIC={("GET","/api/v1/health"),("GET","/api/v1/status"),("GET","/api/v1/auth/bootstrap-status"),("POST","/api/v1/auth/bootstrap"),("POST","/api/v1/auth/login")}
+PUBLIC={("GET","/api/v1/health"),("GET","/api/v1/status"),("GET","/api/v1/platform/health"),("GET","/api/v1/platform/ready"),("GET","/api/v1/auth/bootstrap-status"),("POST","/api/v1/auth/bootstrap"),("POST","/api/v1/auth/login")}
 class SecurityMiddleware(BaseHTTPMiddleware):
     def __init__(self,app,security_service):super().__init__(app);self.security=security_service
     async def dispatch(self,request,call_next):
@@ -18,7 +18,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
     @staticmethod
     def allowed(role,method,path):
         if role=="admin":return True
-        if path.startswith("/api/v1/auth/") or path.startswith("/api/v1/notifications") or path.startswith("/api/v1/agentic"):return True
+        if path.startswith("/api/v1/auth/") or path.startswith("/api/v1/notifications") or path.startswith("/api/v1/agentic") or path.startswith("/api/v1/platform"):return True
         if role=="stock_manager":
             if path.startswith("/api/v1/security") or path.startswith("/api/v1/events"):return False
             if any(path.startswith(x) for x in ["/api/v1/suppliers","/api/v1/procurement","/api/v1/quote-imports","/api/v1/email-quotes"]):return method=="GET"

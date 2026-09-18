@@ -141,6 +141,7 @@ from .session_manager import (
 
 from .material_request_routes import create_material_request_router
 from kynka.security import SecurityMiddleware, SecurityService, SecurityStore, build_security_router
+from kynka.production import MigrationManager, ObservabilityMiddleware, build_production_router
 from kynka.agentic import build_agentic_router
 
 
@@ -178,6 +179,9 @@ def create_app(
         parents=True,
         exist_ok=True,
     )
+
+    # Etapa 32 - additive schema migrations
+    MigrationManager(DATABASE_PATH).apply()
 
     manager = SessionManager(
         settings
@@ -312,6 +316,7 @@ def create_app(
     api.state.security_service = security_service
     api.include_router(build_security_router(security_service))
     api.add_middleware(SecurityMiddleware, security_service=security_service)
+    api.add_middleware(ObservabilityMiddleware)
 
     # ========================================================
     # CORS
@@ -321,6 +326,7 @@ def create_app(
     api.include_router(build_email_quote_router(DATABASE_PATH))
     api.include_router(build_document_router(DATABASE_PATH, DATA_DIRECTORY / "documents"))
     api.include_router(build_agentic_router(DATABASE_PATH, DATA_DIRECTORY / "documents", security_service, inventory_service, supplier_service))
+    api.include_router(build_production_router(DATABASE_PATH, security_service))
 
     api.add_middleware(
         CORSMiddleware,
