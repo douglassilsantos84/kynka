@@ -1,53 +1,131 @@
-from fastapi import APIRouter,Header,HTTPException
-from pydantic import BaseModel,Field
-class BootstrapIn(BaseModel):organization_name:str=Field(min_length=2);name:str=Field(min_length=2);email:str;password:str=Field(min_length=8)
-class LoginIn(BaseModel):email:str;password:str
-class UserIn(BaseModel):name:str=Field(min_length=2);email:str;password:str=Field(min_length=8);role:str="worker"
-class UserPatch(BaseModel):active:bool|None=None;role:str|None=None
-def bearer(v):
-    return v.split(" ",1)[1].strip() if v and v.lower().startswith("bearer ") else ""
+from fastapi import APIRouter, Header, HTTPException, Request
+from pydantic import BaseModel, Field
+
+
+class BootstrapIn(BaseModel):
+    organization_name: str = Field(min_length=2)
+    name: str = Field(min_length=2)
+    email: str
+    password: str = Field(min_length=12)
+
+
+class LoginIn(BaseModel):
+    email: str
+    password: str
+
+
+class UserIn(BaseModel):
+    name: str = Field(min_length=2)
+    email: str
+    password: str = Field(min_length=12)
+    role: str = "worker"
+
+
+class UserPatch(BaseModel):
+    active: bool | None = None
+    role: str | None = None
+
+
+def bearer(value):
+    return value.split(" ", 1)[1].strip() if value and value.lower().startswith("bearer ") else ""
+
+
 def build_security_router(service):
-    r=APIRouter(prefix="/api/v1",tags=["security"])
-    def ident(a):
-        try:return service.authenticate(bearer(a))
-        except ValueError as e:raise HTTPException(401,str(e)) from e
-    def run(fn):
-        try:return fn()
-        except PermissionError as e:raise HTTPException(403,str(e)) from e
-        except ValueError as e:raise HTTPException(400,str(e)) from e
-    @r.get("/auth/bootstrap-status")
-    def bs():return {"required":service.bootstrap_required()}
-    @r.post("/auth/bootstrap",status_code=201)
-    def boot(p:BootstrapIn):return run(lambda:service.bootstrap(p.organization_name,p.name,p.email,p.password))
-    @r.post("/auth/login")
-    def login(p:LoginIn):return run(lambda:service.login(p.email,p.password))
-    @r.get("/auth/me")
-    def me(authorization:str|None=Header(default=None)):return ident(authorization)
-    @r.post("/auth/logout")
-    def logout(authorization:str|None=Header(default=None)):
-        raw=bearer(authorization);ident(authorization);service.store.revoke(service.token_hash(raw));return {"logged_out":True}
-    @r.get("/security/users")
-    def users(authorization:str|None=Header(default=None)):
-        me=ident(authorization)
-        if me["role"]!="admin":raise HTTPException(403,"Permissao insuficiente.")
-        return service.store.users(me["organization_id"])
-    @r.post("/security/users",status_code=201)
-    def create(p:UserIn,authorization:str|None=Header(default=None)):
-        me=ident(authorization);return run(lambda:service.create_user(me,p.name,p.email,p.password,p.role))
-    @r.patch("/security/users/{user_id}")
-    def patch(user_id:int,p:UserPatch,authorization:str|None=Header(default=None)):
-        me=ident(authorization)
-        if me["role"]!="admin":raise HTTPException(403,"Permissao insuficiente.")
-        if p.role is not None and p.role not in {"admin","stock_manager","buyer","worker"}:raise HTTPException(400,"Perfil invalido.")
-        if user_id==me["id"] and p.active is False:raise HTTPException(400,"Nao desative a propria conta administrativa.")
-        if user_id==me["id"] and p.role is not None and p.role!="admin":raise HTTPException(400,"Nao altere o proprio perfil administrativo.")
-        service.store.set_user(user_id,me["organization_id"],p.active,p.role);return service.identity(user_id,me["organization_id"])
-    @r.get("/events")
-    def events(limit:int=100,authorization:str|None=Header(default=None)):
-        me=ident(authorization)
-        if me["role"]!="admin":raise HTTPException(403,"Permissao insuficiente.")
-        return service.store.events(me["organization_id"],min(max(limit,1),500))
-    @r.get("/notifications")
-    def notifications(limit:int=100,authorization:str|None=Header(default=None)):
-        me=ident(authorization);return service.store.notifications(me["organization_id"],me["id"],min(max(limit,1),500))
-    return r
+    router = APIRouter(prefix="/api/v1", tags=["security"])
+
+    def ident(authorization):
+        try:
+            return service.authenticate(bearer(authorization))
+        except ValueError as error:
+            raise HTTPException(401, str(error)) from error
+
+    def run(function):
+        try:
+            return function()
+        except PermissionError as error:
+            raise HTTPException(429 if "tentativas" in str(error) else 403, str(error)) from error
+        except ValueError as error:
+            raise HTTPException(400, str(error)) from error
+
+    @router.get("/auth/bootstrap-status")
+    def bootstrap_status():
+        return {"required": service.bootstrap_required()}
+
+    @router.post("/auth/bootstrap", status_code=201)
+    def bootstrap(payload: BootstrapIn):
+        return run(lambda: service.bootstrap(
+            payload.organization_name, payload.name, payload.email, payload.password
+        ))
+
+    @router.post("/auth/login")
+    def login(payload: LoginIn, request: Request):
+        client = request.client.host if request.client else "unknown"
+        try:
+            return service.login(payload.email, payload.password, client)
+        except PermissionError as error:
+            raise HTTPException(429, str(error)) from error
+        except ValueError as error:
+            raise HTTPException(401, str(error)) from error
+
+    @router.get("/auth/me")
+    def me(authorization: str | None = Header(default=None)):
+        return ident(authorization)
+
+    @router.post("/auth/logout")
+    def logout(authorization: str | None = Header(default=None)):
+        raw = bearer(authorization)
+        identity = ident(authorization)
+        service.store.revoke(service.token_hash(raw))
+        service.store.event(
+            identity["organization_id"], identity["id"],
+            "security.logout", "user", str(identity["id"]), "success"
+        )
+        return {"logged_out": True}
+
+    @router.get("/security/users")
+    def users(authorization: str | None = Header(default=None)):
+        identity = ident(authorization)
+        if identity["role"] != "admin":
+            raise HTTPException(403, "Permissao insuficiente.")
+        return service.store.users(identity["organization_id"])
+
+    @router.post("/security/users", status_code=201)
+    def create(payload: UserIn, authorization: str | None = Header(default=None)):
+        identity = ident(authorization)
+        return run(lambda: service.create_user(
+            identity, payload.name, payload.email, payload.password, payload.role
+        ))
+
+    @router.patch("/security/users/{user_id}")
+    def patch(user_id: int, payload: UserPatch, authorization: str | None = Header(default=None)):
+        identity = ident(authorization)
+        if identity["role"] != "admin":
+            raise HTTPException(403, "Permissao insuficiente.")
+        if payload.role is not None and payload.role not in {
+            "admin", "stock_manager", "buyer", "worker"
+        }:
+            raise HTTPException(400, "Perfil invalido.")
+        if user_id == identity["id"] and payload.active is False:
+            raise HTTPException(400, "Nao desative a propria conta administrativa.")
+        if user_id == identity["id"] and payload.role is not None and payload.role != "admin":
+            raise HTTPException(400, "Nao altere o proprio perfil administrativo.")
+        run(lambda: service.store.set_user(
+            user_id, identity["organization_id"], payload.active, payload.role
+        ))
+        return service.identity(user_id, identity["organization_id"])
+
+    @router.get("/events")
+    def events(limit: int = 100, authorization: str | None = Header(default=None)):
+        identity = ident(authorization)
+        if identity["role"] != "admin":
+            raise HTTPException(403, "Permissao insuficiente.")
+        return service.store.events(identity["organization_id"], min(max(limit, 1), 500))
+
+    @router.get("/notifications")
+    def notifications(limit: int = 100, authorization: str | None = Header(default=None)):
+        identity = ident(authorization)
+        return service.store.notifications(
+            identity["organization_id"], identity["id"], min(max(limit, 1), 500)
+        )
+
+    return router
