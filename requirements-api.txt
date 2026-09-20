@@ -10,3 +10,7 @@ python-docx>=1.1
 
 # Production 1.0 - PostgreSQL driver (repository port pending)
 psycopg[binary]>=3.2,<4
+
+# Production 1.0 - professional schema migration tooling
+SQLAlchemy>=2.0,<3
+alembic>=1.14,<2
