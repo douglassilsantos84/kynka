@@ -5,6 +5,7 @@ Implementação SQLite do repositório de inventário.
 from __future__ import annotations
 
 import sqlite3
+from contextlib import closing
 from datetime import datetime
 from pathlib import Path
 
@@ -50,7 +51,7 @@ class SQLiteInventoryRepository(
             "PRAGMA foreign_keys = ON"
         )
 
-        return connection
+        return closing(connection)
 
     def _initialize_database(
         self,
