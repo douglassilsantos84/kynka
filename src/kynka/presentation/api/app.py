@@ -141,7 +141,7 @@ from .session_manager import (
 
 from .material_request_routes import create_material_request_router
 from kynka.security import SecurityMiddleware, SecurityService, SecurityStore, build_security_router
-from kynka.production import MigrationManager, ObservabilityMiddleware, build_production_router
+from kynka.production import MigrationManager, ObservabilityMiddleware, OperationsSettings, build_production_router
 from kynka.production_data import PostgreSQLTarget
 from kynka.spatial import build_spatial_router
 from kynka.spatial.migrations import apply_spatial_migration
@@ -192,6 +192,12 @@ def create_app(
     # PostgreSQL is an independently probed migration target.
     # Legacy repositories remain on SQLite until Etapa 40C.
     postgresql_target = PostgreSQLTarget.from_env()
+    operations_settings = OperationsSettings.from_env()
+    operation_errors = operations_settings.validate(postgresql_target)
+    if operations_settings.strict_startup and operation_errors:
+        raise RuntimeError(
+            "Configuracao operacional invalida: " + "; ".join(operation_errors)
+        )
 
     DATA_DIRECTORY.mkdir(
         parents=True,
@@ -301,6 +307,7 @@ def create_app(
     api.state.sessions = manager
     api.state.postgresql_target = postgresql_target
     api.state.database_path = active_database_path
+    api.state.operations_settings = operations_settings
 
     api.state.inventory_service = (
         inventory_service
@@ -352,6 +359,7 @@ def create_app(
             active_database_path,
             security_service,
             postgresql_target=postgresql_target,
+            operations_settings=operations_settings,
         )
     )
     api.include_router(build_spatial_router(active_database_path, security_service))

@@ -21,7 +21,7 @@ class SyncIn(BaseModel):
 def _bearer(v):
     return v.split(" ",1)[1].strip() if v and v.lower().startswith("bearer ") else ""
 
-def build_production_router(database_path, security_service, postgresql_target=None):
+def build_production_router(database_path, security_service, postgresql_target=None, operations_settings=None):
     r=APIRouter(prefix="/api/v1/platform",tags=["platform"])
     migrations=MigrationManager(database_path)
     events=RealtimeEventStore(database_path)
@@ -42,7 +42,16 @@ def build_production_router(database_path, security_service, postgresql_target=N
             checks["database"]=True
             checks["migrations"]=len(migrations.status())>=1
         except Exception:pass
-        ok=all(checks.values())
+        if operations_settings is not None:
+            operation_errors = operations_settings.validate(postgresql_target)
+            checks["operations"] = len(operation_errors) == 0
+            if operations_settings.require_postgresql_target:
+                checks["postgresql_target"] = bool(
+                    postgresql_target and postgresql_target.probe().get("available")
+                )
+            if operation_errors:
+                checks["operation_errors"] = operation_errors
+        ok=all(value for key,value in checks.items() if key != "operation_errors")
         if not ok:raise HTTPException(503,detail={"status":"not_ready","checks":checks})
         return {"status":"ready","checks":checks}
 
@@ -53,6 +62,8 @@ def build_production_router(database_path, security_service, postgresql_target=N
         return {"api":"v1","organization_id":i["organization_id"],"role":i["role"],
                 "database_backend":"postgresql" if db_url.startswith("postgres") else "sqlite",
                 "postgresql_target_configured":bool(postgresql_target and postgresql_target.configured),
+                "environment":getattr(operations_settings,"environment","development"),
+                "strict_startup":bool(getattr(operations_settings,"strict_startup",False)),
                 "realtime":"sse","mobile_sync":"idempotent-envelope"}
 
     @r.get("/database-target")
