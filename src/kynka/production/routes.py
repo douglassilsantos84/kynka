@@ -21,7 +21,7 @@ class SyncIn(BaseModel):
 def _bearer(v):
     return v.split(" ",1)[1].strip() if v and v.lower().startswith("bearer ") else ""
 
-def build_production_router(database_path, security_service):
+def build_production_router(database_path, security_service, postgresql_target=None):
     r=APIRouter(prefix="/api/v1/platform",tags=["platform"])
     migrations=MigrationManager(database_path)
     events=RealtimeEventStore(database_path)
@@ -52,7 +52,16 @@ def build_production_router(database_path, security_service):
         db_url=os.getenv("KYNKA_DATABASE_URL","sqlite:///data/kynka.db")
         return {"api":"v1","organization_id":i["organization_id"],"role":i["role"],
                 "database_backend":"postgresql" if db_url.startswith("postgres") else "sqlite",
+                "postgresql_target_configured":bool(postgresql_target and postgresql_target.configured),
                 "realtime":"sse","mobile_sync":"idempotent-envelope"}
+
+    @r.get("/database-target")
+    def database_target(authorization: str|None=Header(default=None)):
+        i=identity(authorization)
+        if i["role"]!="admin":raise HTTPException(403,"Permissao insuficiente.")
+        if postgresql_target is None:
+            return {"configured":False,"available":False,"backend":"postgresql"}
+        return postgresql_target.probe()
 
     @r.get("/migrations")
     def migration_status(authorization: str|None=Header(default=None)):

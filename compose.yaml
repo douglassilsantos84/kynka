@@ -8,3 +8,27 @@ services:
     volumes:
       - ./data:/app/data
     restart: unless-stopped
+
+  kynka-postgres:
+    image: postgres:17
+    profiles:
+      - postgres
+    environment:
+      POSTGRES_USER: kynka
+      POSTGRES_PASSWORD: ${KYNKA_POSTGRES_PASSWORD:-}
+      POSTGRES_DB: kynka
+    ports:
+      - "${KYNKA_POSTGRES_HOST_PORT:-5433}:5432"
+    volumes:
+      - kynka-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kynka -d kynka"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
+volumes:
+  kynka-postgres-data:
+    name: kynka-postgres-data

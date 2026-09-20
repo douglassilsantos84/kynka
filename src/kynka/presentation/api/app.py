@@ -142,6 +142,7 @@ from .session_manager import (
 from .material_request_routes import create_material_request_router
 from kynka.security import SecurityMiddleware, SecurityService, SecurityStore, build_security_router
 from kynka.production import MigrationManager, ObservabilityMiddleware, build_production_router
+from kynka.production_data import PostgreSQLTarget
 from kynka.spatial import build_spatial_router
 from kynka.spatial.migrations import apply_spatial_migration
 from kynka.agentic import build_agentic_router
@@ -176,6 +177,11 @@ def create_app(
         settings
         or APISettings.from_env()
     )
+
+    # Production 1.0 / Etapa 40A.3
+    # PostgreSQL is an independently probed migration target.
+    # Legacy repositories remain on SQLite until Etapa 40C.
+    postgresql_target = PostgreSQLTarget.from_env()
 
     DATA_DIRECTORY.mkdir(
         parents=True,
@@ -283,6 +289,7 @@ def create_app(
 
     api.state.settings = settings
     api.state.sessions = manager
+    api.state.postgresql_target = postgresql_target
 
     api.state.inventory_service = (
         inventory_service
@@ -329,7 +336,13 @@ def create_app(
     api.include_router(build_email_quote_router(DATABASE_PATH))
     api.include_router(build_document_router(DATABASE_PATH, DATA_DIRECTORY / "documents"))
     api.include_router(build_agentic_router(DATABASE_PATH, DATA_DIRECTORY / "documents", security_service, inventory_service, supplier_service))
-    api.include_router(build_production_router(DATABASE_PATH, security_service))
+    api.include_router(
+        build_production_router(
+            DATABASE_PATH,
+            security_service,
+            postgresql_target=postgresql_target,
+        )
+    )
     api.include_router(build_spatial_router(DATABASE_PATH, security_service))
 
     api.add_middleware(

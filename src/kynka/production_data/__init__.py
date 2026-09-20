@@ -1,3 +1,8 @@
-from .database import DatabaseConfiguration, DatabaseBackend
+from .database import DatabaseBackend, DatabaseConfiguration
+from .postgresql import PostgreSQLTarget
 
-__all__ = ["DatabaseConfiguration", "DatabaseBackend"]
+__all__ = [
+    "DatabaseBackend",
+    "DatabaseConfiguration",
+    "PostgreSQLTarget",
+]
