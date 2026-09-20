@@ -146,6 +146,7 @@ from kynka.production_data import PostgreSQLTarget
 from kynka.spatial import build_spatial_router
 from kynka.spatial.migrations import apply_spatial_migration
 from kynka.agentic import build_agentic_router
+from kynka.product_integration import build_product_integration_router
 
 
 # ============================================================
@@ -363,6 +364,7 @@ def create_app(
         )
     )
     api.include_router(build_spatial_router(active_database_path, security_service))
+    api.include_router(build_product_integration_router())
 
     api.add_middleware(
         CORSMiddleware,

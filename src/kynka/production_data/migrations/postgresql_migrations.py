@@ -203,12 +203,282 @@ BASELINE_STATEMENTS = (
 )
 
 
+
+BUSINESS_INTEGRATION_STATEMENTS = (
+    """
+    CREATE TABLE IF NOT EXISTS business_materials(
+        organization_id BIGINT NOT NULL,
+        code TEXT NOT NULL,
+        name TEXT NOT NULL,
+        quantity DOUBLE PRECISION NOT NULL DEFAULT 0,
+        unit TEXT NOT NULL DEFAULT 'un',
+        minimum_quantity DOUBLE PRECISION NOT NULL DEFAULT 0,
+        PRIMARY KEY(organization_id, code)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS business_inventory_movements(
+        id BIGSERIAL PRIMARY KEY,
+        organization_id BIGINT NOT NULL,
+        material_code TEXT NOT NULL,
+        movement_type TEXT NOT NULL,
+        quantity DOUBLE PRECISION NOT NULL,
+        previous_quantity DOUBLE PRECISION NOT NULL,
+        new_quantity DOUBLE PRECISION NOT NULL,
+        reason TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_business_inventory_org_material ON business_inventory_movements(organization_id, material_code, id DESC)",
+    """
+    CREATE TABLE IF NOT EXISTS business_demands(
+        id BIGSERIAL PRIMARY KEY,
+        organization_id BIGINT NOT NULL,
+        code TEXT NOT NULL,
+        name TEXT NOT NULL,
+        kind TEXT NOT NULL DEFAULT 'project',
+        client TEXT NOT NULL DEFAULT '',
+        location TEXT NOT NULL DEFAULT '',
+        start_date TEXT,
+        status TEXT NOT NULL DEFAULT 'draft',
+        notes TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        UNIQUE(organization_id, code)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS business_demand_requirements(
+        id BIGSERIAL PRIMARY KEY,
+        organization_id BIGINT NOT NULL,
+        demand_id BIGINT NOT NULL,
+        material_code TEXT NOT NULL,
+        required_quantity DOUBLE PRECISION NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS business_stock_reservations(
+        id BIGSERIAL PRIMARY KEY,
+        organization_id BIGINT NOT NULL,
+        demand_id BIGINT NOT NULL,
+        material_code TEXT NOT NULL,
+        quantity DOUBLE PRECISION NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE(organization_id, demand_id, material_code)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS business_suppliers(
+        id BIGSERIAL PRIMARY KEY,
+        organization_id BIGINT NOT NULL,
+        code TEXT NOT NULL,
+        name TEXT NOT NULL,
+        nif TEXT NOT NULL DEFAULT '',
+        email TEXT NOT NULL DEFAULT '',
+        phone TEXT NOT NULL DEFAULT '',
+        notes TEXT NOT NULL DEFAULT '',
+        active BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(organization_id, code)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS business_supplier_materials(
+        id BIGSERIAL PRIMARY KEY,
+        organization_id BIGINT NOT NULL,
+        supplier_id BIGINT NOT NULL,
+        material_code TEXT NOT NULL,
+        unit_price DOUBLE PRECISION NOT NULL,
+        lead_time_days INTEGER NOT NULL DEFAULT 0,
+        minimum_order_quantity DOUBLE PRECISION NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL,
+        UNIQUE(organization_id, supplier_id, material_code)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS business_supplier_price_history(
+        id BIGSERIAL PRIMARY KEY,
+        organization_id BIGINT NOT NULL,
+        supplier_id BIGINT NOT NULL,
+        material_code TEXT NOT NULL,
+        unit_price DOUBLE PRECISION NOT NULL,
+        recorded_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS business_purchase_orders(
+        id BIGSERIAL PRIMARY KEY,
+        organization_id BIGINT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'draft',
+        demand_ids_json TEXT NOT NULL DEFAULT '[]',
+        demand_codes_json TEXT NOT NULL DEFAULT '[]',
+        supplier_id BIGINT,
+        supplier_code TEXT,
+        supplier_name TEXT,
+        total_estimated DOUBLE PRECISION NOT NULL DEFAULT 0,
+        notes TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        ordered_at TEXT,
+        completed_at TEXT
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS business_purchase_order_items(
+        id BIGSERIAL PRIMARY KEY,
+        organization_id BIGINT NOT NULL,
+        order_id BIGINT NOT NULL,
+        material_code TEXT NOT NULL,
+        material_name TEXT NOT NULL,
+        unit TEXT NOT NULL,
+        quantity_ordered DOUBLE PRECISION NOT NULL,
+        quantity_received DOUBLE PRECISION NOT NULL DEFAULT 0,
+        unit_price DOUBLE PRECISION NOT NULL DEFAULT 0,
+        total_price DOUBLE PRECISION NOT NULL DEFAULT 0
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS business_material_requests(
+        id BIGSERIAL PRIMARY KEY,
+        organization_id BIGINT NOT NULL,
+        code TEXT NOT NULL,
+        demand_id BIGINT NOT NULL,
+        requester_name TEXT NOT NULL,
+        priority TEXT NOT NULL DEFAULT 'normal',
+        notes TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'requested',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        approved_at TEXT,
+        ready_at TEXT,
+        delivered_at TEXT,
+        cancelled_at TEXT,
+        UNIQUE(organization_id, code)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS business_material_request_items(
+        id BIGSERIAL PRIMARY KEY,
+        organization_id BIGINT NOT NULL,
+        request_id BIGINT NOT NULL,
+        material_code TEXT NOT NULL,
+        material_name TEXT NOT NULL,
+        unit TEXT NOT NULL,
+        quantity_requested DOUBLE PRECISION NOT NULL,
+        quantity_available DOUBLE PRECISION NOT NULL DEFAULT 0,
+        quantity_separated DOUBLE PRECISION NOT NULL DEFAULT 0,
+        shortage_quantity DOUBLE PRECISION NOT NULL DEFAULT 0
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS business_material_request_events(
+        id BIGSERIAL PRIMARY KEY,
+        organization_id BIGINT NOT NULL,
+        request_id BIGINT NOT NULL,
+        event_type TEXT NOT NULL,
+        from_status TEXT,
+        to_status TEXT,
+        actor TEXT NOT NULL DEFAULT '',
+        notes TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS business_documents(
+        id BIGSERIAL PRIMARY KEY,
+        organization_id BIGINT NOT NULL,
+        original_name TEXT NOT NULL,
+        stored_name TEXT NOT NULL,
+        file_type TEXT NOT NULL,
+        mime_type TEXT,
+        size_bytes BIGINT NOT NULL DEFAULT 0,
+        sha256 TEXT NOT NULL,
+        title TEXT,
+        category TEXT NOT NULL DEFAULT 'geral',
+        status TEXT NOT NULL DEFAULT 'indexed',
+        extracted_text TEXT NOT NULL DEFAULT '',
+        metadata_json TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL,
+        indexed_at TEXT,
+        deleted_at TEXT,
+        UNIQUE(organization_id, sha256)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS business_document_chunks(
+        id BIGSERIAL PRIMARY KEY,
+        organization_id BIGINT NOT NULL,
+        document_id BIGINT NOT NULL,
+        chunk_index INTEGER NOT NULL,
+        content TEXT NOT NULL,
+        embedding_json TEXT NOT NULL DEFAULT '[]',
+        UNIQUE(organization_id, document_id, chunk_index)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS business_supplier_quote_imports(
+        id BIGSERIAL PRIMARY KEY,
+        organization_id BIGINT NOT NULL,
+        supplier_id BIGINT,
+        supplier_code TEXT,
+        supplier_name TEXT,
+        file_name TEXT NOT NULL,
+        file_type TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'review',
+        total_rows INTEGER NOT NULL DEFAULT 0,
+        matched_rows INTEGER NOT NULL DEFAULT 0,
+        unresolved_rows INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        approved_at TEXT
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS business_supplier_quote_import_items(
+        id BIGSERIAL PRIMARY KEY,
+        organization_id BIGINT NOT NULL,
+        import_id BIGINT NOT NULL,
+        row_number INTEGER NOT NULL,
+        supplier_reference TEXT NOT NULL DEFAULT '',
+        description TEXT NOT NULL DEFAULT '',
+        unit TEXT NOT NULL DEFAULT '',
+        quantity DOUBLE PRECISION,
+        unit_price DOUBLE PRECISION NOT NULL,
+        matched_material_code TEXT,
+        match_method TEXT NOT NULL DEFAULT '',
+        confidence DOUBLE PRECISION NOT NULL DEFAULT 0,
+        previous_price DOUBLE PRECISION,
+        status TEXT NOT NULL DEFAULT 'review',
+        raw_data TEXT NOT NULL DEFAULT '{}'
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS business_supplier_material_aliases(
+        id BIGSERIAL PRIMARY KEY,
+        organization_id BIGINT NOT NULL,
+        supplier_id BIGINT NOT NULL,
+        supplier_reference TEXT NOT NULL,
+        material_code TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(organization_id, supplier_id, supplier_reference)
+    )
+    """,
+)
+
 def build_baseline_migrations() -> tuple[PostgreSQLMigration, ...]:
     return (
         PostgreSQLMigration(
             version="0040_0001",
             description="production identity mobile realtime spatial baseline",
             statements=tuple(statement.strip() for statement in BASELINE_STATEMENTS),
+        ),
+        PostgreSQLMigration(
+            version="0055_0001",
+            description="tenant scoped business product integration schema",
+            statements=tuple(
+                statement.strip()
+                for statement in BUSINESS_INTEGRATION_STATEMENTS
+            ),
         ),
     )
 
