@@ -171,12 +171,22 @@ DATABASE_PATH = (
 
 def create_app(
     settings: APISettings | None = None,
+    database_path: str | Path | None = None,
 ) -> FastAPI:
 
     settings = (
         settings
         or APISettings.from_env()
     )
+
+    # Production 1.0 / Quality 47-50:
+    # explicit persistence injection keeps integration tests hermetic.
+    active_database_path = (
+        Path(database_path)
+        if database_path is not None
+        else DATABASE_PATH
+    )
+    active_database_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Production 1.0 / Etapa 40A.3
     # PostgreSQL is an independently probed migration target.
@@ -189,8 +199,8 @@ def create_app(
     )
 
     # Etapa 32 - additive schema migrations
-    MigrationManager(DATABASE_PATH).apply()
-    apply_spatial_migration(DATABASE_PATH)
+    MigrationManager(active_database_path).apply()
+    apply_spatial_migration(active_database_path)
 
     manager = SessionManager(
         settings
@@ -202,7 +212,7 @@ def create_app(
 
     inventory_repository = (
         SQLiteInventoryRepository(
-            DATABASE_PATH
+            active_database_path
         )
     )
 
@@ -220,7 +230,7 @@ def create_app(
 
     demand_repository = (
         SQLiteDemandRepository(
-            DATABASE_PATH
+            active_database_path
         )
     )
 
@@ -240,7 +250,7 @@ def create_app(
     )
 
     supplier_repository = SQLiteSupplierRepository(
-        DATABASE_PATH
+        active_database_path
     )
 
     supplier_service = SupplierService(
@@ -251,7 +261,7 @@ def create_app(
     )
 
     purchase_order_repository = SQLitePurchaseOrderRepository(
-        DATABASE_PATH
+        active_database_path
     )
 
     purchase_order_service = PurchaseOrderService(
@@ -290,6 +300,7 @@ def create_app(
     api.state.settings = settings
     api.state.sessions = manager
     api.state.postgresql_target = postgresql_target
+    api.state.database_path = active_database_path
 
     api.state.inventory_service = (
         inventory_service
@@ -320,7 +331,7 @@ def create_app(
     )
 
     # Etapas 24-26 - Security / Organization / Events
-    security_store = SecurityStore(DATABASE_PATH)
+    security_store = SecurityStore(active_database_path)
     security_service = SecurityService(security_store)
     api.state.security_store = security_store
     api.state.security_service = security_service
@@ -332,18 +343,18 @@ def create_app(
     # CORS
     # ========================================================
 
-    api.include_router(build_quote_import_router(DATABASE_PATH))
-    api.include_router(build_email_quote_router(DATABASE_PATH))
-    api.include_router(build_document_router(DATABASE_PATH, DATA_DIRECTORY / "documents"))
-    api.include_router(build_agentic_router(DATABASE_PATH, DATA_DIRECTORY / "documents", security_service, inventory_service, supplier_service))
+    api.include_router(build_quote_import_router(active_database_path))
+    api.include_router(build_email_quote_router(active_database_path))
+    api.include_router(build_document_router(active_database_path, DATA_DIRECTORY / "documents"))
+    api.include_router(build_agentic_router(active_database_path, DATA_DIRECTORY / "documents", security_service, inventory_service, supplier_service))
     api.include_router(
         build_production_router(
-            DATABASE_PATH,
+            active_database_path,
             security_service,
             postgresql_target=postgresql_target,
         )
     )
-    api.include_router(build_spatial_router(DATABASE_PATH, security_service))
+    api.include_router(build_spatial_router(active_database_path, security_service))
 
     api.add_middleware(
         CORSMiddleware,
@@ -2056,7 +2067,7 @@ def create_app(
     # ========================================================
 
     api.include_router(
-        create_material_request_router(DATABASE_PATH)
+        create_material_request_router(active_database_path)
     )
 
     return api
